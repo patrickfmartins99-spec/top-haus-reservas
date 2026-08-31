@@ -1,0 +1,45 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isStaff() {
+      return request.auth != null && request.auth.token.staff == true;
+    }
+
+    function isAdmin() {
+      return request.auth != null && request.auth.token.admin == true;
+    }
+
+    // Reservas públicas são criadas somente pela rota segura do servidor.
+    match /reservations/{reservationId} {
+      allow read, create, update, delete: if isStaff();
+    }
+
+    match /waitlist/{entryId} {
+      allow read, create, update, delete: if isStaff();
+    }
+
+    match /auditLogs/{logId} {
+      allow read: if isStaff();
+      allow write: if false;
+    }
+
+    match /serviceCapacity/{serviceId} {
+      allow read: if isStaff();
+      allow write: if false;
+    }
+
+    match /specialDates/{dateId} {
+      allow read, create, update, delete: if isStaff();
+    }
+
+    match /staff/{userId} {
+      allow read: if isStaff();
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

@@ -41,4 +41,3 @@ O arquivo `netlify.toml` já define o comando de build e a saída do Next.js. De
 ## Documentação do produto
 
 As regras consolidadas estão em `docs/requisitos-mvp.md`.
-
