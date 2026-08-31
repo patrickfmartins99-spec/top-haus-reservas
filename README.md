@@ -1,0 +1,44 @@
+# Top Haus Reservas
+
+Primeira base do sistema de reservas do restaurante Top Haus, preparada para Next.js, Netlify e Firebase.
+
+## O que já está disponível
+
+- Reserva pública para almoço e rodízio.
+- Horários de chegada e tolerância configurados conforme as regras do restaurante.
+- Grupos de até 20 pessoas com confirmação automática e grupos maiores sujeitos a aprovação.
+- Limite transacional de 70 lugares por serviço.
+- Preferências de sofá, parede de vidro e parede com tomada.
+- Login individual da equipe com Firebase Authentication.
+- Login por nome de usuário, com e-mail técnico invisível gerado automaticamente.
+- Gestão administrativa para criar, bloquear, desbloquear e redefinir acessos.
+- Protótipo responsivo do painel, da fila de espera e da auditoria.
+- Regras de segurança e índices iniciais do Firestore.
+
+## Executar localmente
+
+1. Instale as dependências com `npm install`.
+2. Copie `.env.example` para `.env.local` e preencha as configurações.
+3. Inicie com `npm run dev`.
+4. Abra `http://localhost:3000`.
+
+Sem as credenciais, o formulário funciona em modo de demonstração e não grava dados.
+
+## Conectar o Firebase
+
+1. Registre um aplicativo Web no projeto Firebase existente.
+2. Ative o Cloud Firestore e o provedor E-mail/senha em Authentication.
+3. Preencha as variáveis públicas e privadas descritas em `.env.example`.
+4. Publique `firestore.rules` e `firestore.indexes.json` no projeto correto.
+5. Cadastre cada colaborador com usuário individual e atribua a custom claim `staff: true` por uma operação administrativa segura.
+
+Nunca envie ou salve a chave privada da conta de serviço no GitHub. No Netlify, cadastre as variáveis privadas em **Site configuration → Environment variables**.
+
+## Implantação no Netlify
+
+O arquivo `netlify.toml` já define o comando de build e a saída do Next.js. Depois de conectar o repositório no Netlify, cadastre as mesmas variáveis de ambiente e execute uma implantação de teste antes de publicar em produção.
+
+## Documentação do produto
+
+As regras consolidadas estão em `docs/requisitos-mvp.md`.
+
