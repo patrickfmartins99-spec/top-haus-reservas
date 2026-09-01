@@ -13,9 +13,10 @@ import {
   Settings,
   UserCog,
   Users,
-  UtensilsCrossed,
 } from 'lucide-react';
+import Link from 'next/link';
 
+import { BrandLogo } from '@/components/brand-logo';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -43,18 +44,18 @@ const waitlist = [
 
 function statusClass(status: string) {
   if (status === 'Aguardando aprovação') return 'bg-haus-gold/15 text-[#7b571d]';
-  if (status === 'Presença confirmada') return 'bg-blue-100 text-blue-700';
+  if (status === 'Presença confirmada') return 'bg-black text-white';
   return 'bg-haus-sage/10 text-haus-sage';
 }
 
 export default function DashboardPage() {
   return (
-    <main className="min-h-screen bg-[#f5f2eb] text-haus-ink">
-      <div className="grid min-h-screen lg:grid-cols-[240px_1fr]">
+    <main className="min-h-screen bg-[#efede8] text-haus-ink">
+      <div className="grid min-h-screen lg:grid-cols-[252px_1fr]">
         <aside className="hidden border-r border-black/7 bg-haus-ink px-4 py-6 text-white lg:flex lg:flex-col">
           <div className="flex items-center gap-3 px-2">
-            <span className="grid size-10 place-items-center rounded-full border border-haus-gold/35"><UtensilsCrossed className="size-4 text-haus-gold" /></span>
-            <div><p className="font-heading font-bold tracking-[0.12em]">TOP HAUS</p><p className="text-[10px] uppercase tracking-[0.2em] text-white/40">Reservas</p></div>
+            <BrandLogo compact priority className="rounded-md" />
+            <div className="border-l border-white/10 pl-3"><p className="text-sm font-bold">Reservas</p><p className="text-[10px] uppercase tracking-[0.16em] text-white/40">Equipe</p></div>
           </div>
           <nav className="mt-10 space-y-1 text-sm">
             {[
@@ -64,11 +65,11 @@ export default function DashboardPage() {
               { icon: History, label: 'Auditoria' },
               { icon: UserCog, label: 'Usuários', href: '/painel/usuarios' },
               { icon: Settings, label: 'Configurações' },
-            ].map(({ icon: Icon, label, active, count, href }) => (
-              <a key={label} href={href ?? '#'} className={`flex items-center gap-3 rounded-lg px-3 py-2.5 ${active ? 'bg-white/10 text-white' : 'text-white/55 hover:bg-white/5 hover:text-white'}`}>
-                <Icon className="size-4" />{label}{count ? <span className="ml-auto rounded-full bg-haus-terracotta px-2 py-0.5 text-[10px] font-bold text-white">{count}</span> : null}
-              </a>
-            ))}
+            ].map(({ icon: Icon, label, active, count, href }) => {
+              const content = <><Icon className="size-4" />{label}{count ? <span className="ml-auto rounded-full bg-haus-terracotta px-2 py-0.5 text-[10px] font-bold text-white">{count}</span> : null}</>;
+              const className = `flex items-center gap-3 rounded-lg px-3 py-2.5 ${active ? 'bg-white/10 text-white' : 'text-white/55 hover:bg-white/5 hover:text-white'}`;
+              return href ? <Link key={label} href={href} className={className}>{content}</Link> : <a key={label} href="#" className={className}>{content}</a>;
+            })}
           </nav>
           <div className="mt-auto border-t border-white/10 pt-4">
             <button className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm text-white/55 hover:bg-white/5"><LogOut className="size-4" /> Sair</button>
@@ -78,7 +79,7 @@ export default function DashboardPage() {
         <section className="min-w-0">
           <header className="flex h-20 items-center justify-between border-b border-black/7 bg-white px-5 sm:px-8">
             <div>
-              <p className="text-xs font-medium text-haus-ink/45">Domingo, 30 de agosto</p>
+              <p className="text-xs font-medium text-haus-ink/45">Terça-feira, 1 de setembro</p>
               <h1 className="font-heading text-xl font-bold">Boa noite, equipe</h1>
             </div>
             <div className="flex items-center gap-2">
@@ -87,10 +88,17 @@ export default function DashboardPage() {
             </div>
           </header>
 
+          <nav className="flex gap-2 overflow-x-auto border-b border-black/7 bg-white px-5 pb-3 lg:hidden" aria-label="Navegação do painel">
+            <Link href="/painel" className="whitespace-nowrap rounded-full bg-black px-4 py-2 text-xs font-bold text-white">Visão geral</Link>
+            <a href="#reservas" className="whitespace-nowrap rounded-full bg-black/5 px-4 py-2 text-xs font-semibold text-black/55">Reservas</a>
+            <a href="#fila" className="whitespace-nowrap rounded-full bg-black/5 px-4 py-2 text-xs font-semibold text-black/55">Fila de espera</a>
+            <Link href="/painel/usuarios" className="whitespace-nowrap rounded-full bg-black/5 px-4 py-2 text-xs font-semibold text-black/55">Usuários</Link>
+          </nav>
+
           <div className="mx-auto max-w-[1500px] space-y-7 p-5 sm:p-8">
             <div className="flex flex-wrap items-center justify-between gap-4">
-              <div><h2 className="font-heading text-3xl font-bold">Reservas de hoje</h2><p className="mt-1 text-sm text-haus-ink/50">Acompanhe almoço, rodízio e fila de espera.</p></div>
-              <Button className="h-10 bg-haus-terracotta px-4 text-white hover:bg-haus-terracotta/90"><Plus className="size-4" /> Nova reserva</Button>
+              <div><p className="text-xs font-bold uppercase tracking-[0.16em] text-haus-terracotta">Visão geral</p><h2 className="mt-2 font-heading text-3xl font-extrabold tracking-[-0.03em]">Reservas de hoje</h2><p className="mt-1 text-sm text-haus-ink/50">Acompanhe almoço, rodízio e fila de espera.</p></div>
+              <Button className="h-10 bg-black px-4 text-white hover:bg-black/85"><Plus className="size-4" /> Nova reserva</Button>
             </div>
 
             <div className="rounded-xl border border-haus-gold/25 bg-haus-gold/10 px-4 py-3 text-sm text-haus-ink/70">
@@ -112,7 +120,7 @@ export default function DashboardPage() {
             </div>
 
             <div className="grid gap-5 xl:grid-cols-[1fr_340px]">
-              <Card className="bg-white ring-black/7">
+              <Card id="reservas" className="bg-white ring-black/7">
                 <CardHeader className="flex-row items-center justify-between border-b border-black/6">
                   <div><CardTitle className="font-heading text-xl font-bold">Rodízio</CardTitle><p className="mt-1 text-xs text-haus-ink/45">38 de 70 lugares ocupados</p></div>
                   <Badge variant="outline" className="border-haus-sage/20 bg-haus-sage/8 text-haus-sage">54% ocupado</Badge>
@@ -125,7 +133,7 @@ export default function DashboardPage() {
                       {reservations.map((reservation) => (
                         <TableRow key={`${reservation.time}-${reservation.name}`}>
                           <TableCell className="font-semibold">{reservation.time}</TableCell>
-                          <TableCell>{reservation.name}</TableCell>
+                          <TableCell><Link href="/painel/reservas/demo" className="font-semibold underline-offset-4 hover:underline">{reservation.name}</Link></TableCell>
                           <TableCell>{reservation.party}</TableCell>
                           <TableCell className="text-haus-ink/50">{reservation.preference}</TableCell>
                           <TableCell><Badge className={statusClass(reservation.status)}>{reservation.status}</Badge></TableCell>
@@ -137,7 +145,7 @@ export default function DashboardPage() {
                 </CardContent>
               </Card>
 
-              <Card className="bg-white ring-black/7">
+              <Card id="fila" className="bg-white ring-black/7">
                 <CardHeader className="flex-row items-center justify-between border-b border-black/6"><div><CardTitle className="font-heading text-xl font-bold">Fila de espera</CardTitle><p className="mt-1 text-xs text-haus-ink/45">Atualizada agora</p></div><Badge className="bg-haus-terracotta text-white">3</Badge></CardHeader>
                 <CardContent className="space-y-3">
                   {waitlist.map((entry) => (

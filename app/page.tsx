@@ -1,6 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import Link from 'next/link';
 import {
   CalendarDays,
   Check,
@@ -13,9 +14,9 @@ import {
   ShieldCheck,
   LoaderCircle,
   Users,
-  UtensilsCrossed,
 } from 'lucide-react';
 
+import { BrandLogo } from '@/components/brand-logo';
 import { Button } from '@/components/ui/button';
 import {
   Card,
@@ -90,7 +91,7 @@ export default function Home() {
     setChecked(false);
   }
 
-  async function checkAvailability(event: React.FormEvent<HTMLFormElement>) {
+  async function checkAvailability(event: React.SyntheticEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!date) return;
     if (!checked) {
@@ -130,21 +131,19 @@ export default function Home() {
       <header className="border-b border-white/10 bg-haus-ink text-white">
         <div className="mx-auto flex h-20 max-w-7xl items-center justify-between px-5 sm:px-8">
           <a href="#inicio" className="flex items-center gap-3" aria-label="Top Haus — início">
-            <span className="grid size-11 place-items-center rounded-full border border-haus-gold/40 bg-white/5">
-              <UtensilsCrossed className="size-5 text-haus-gold" />
-            </span>
-            <span>
-              <span className="block font-heading text-xl font-bold tracking-[0.14em]">TOP HAUS</span>
-              <span className="block text-[10px] uppercase tracking-[0.3em] text-white/55">Restaurante</span>
+            <BrandLogo compact priority className="rounded-md" />
+            <span className="hidden border-l border-white/15 pl-3 sm:block">
+              <span className="block text-sm font-semibold">Reservas</span>
+              <span className="block text-[10px] uppercase tracking-[0.18em] text-white/45">Cliente</span>
             </span>
           </a>
-          <a
-            href="/entrar"
-            className="hidden items-center gap-2 rounded-full border border-white/15 px-4 py-2 text-sm font-medium text-white/85 transition hover:border-haus-gold/60 hover:text-white sm:flex"
+          <Link
+            href="/minha-reserva"
+            className="flex items-center gap-2 rounded-full border border-white/15 px-4 py-2 text-sm font-medium text-white/85 transition hover:border-haus-gold/60 hover:text-white"
           >
-            Acesso da equipe
+            Consultar reserva
             <ChevronRight className="size-4" />
-          </a>
+          </Link>
         </div>
       </header>
 
@@ -160,8 +159,8 @@ export default function Home() {
               <span className="h-px w-7 bg-haus-gold" />
               Sua mesa está esperando
             </p>
-            <h1 className="font-heading text-4xl font-bold leading-[1.04] tracking-tight sm:text-5xl lg:text-6xl">
-              Reserve seu momento no Top Haus.
+            <h1 className="font-heading text-4xl font-extrabold leading-[1.04] tracking-[-0.035em] sm:text-5xl lg:text-6xl">
+              Sua mesa no Top Haus, sem complicação.
             </h1>
             <p className="mt-6 max-w-lg text-base leading-7 text-white/65 sm:text-lg">
               Escolha o almoço ou o rodízio, informe o tamanho do grupo e encontre o melhor horário para sua visita.
@@ -172,19 +171,23 @@ export default function Home() {
             </div>
           </div>
 
-          <Card id="reserva" className="border-0 bg-[#fffdf8] py-0 text-haus-ink shadow-[0_28px_80px_rgba(0,0,0,0.28)] ring-0">
+          <Card id="reserva" className="border-0 bg-[#fdfcf9] py-0 text-haus-ink shadow-[0_28px_80px_rgba(0,0,0,0.28)] ring-0">
             <CardHeader className="border-b border-black/7 px-5 py-5 sm:px-7 sm:py-6">
               <div className="flex items-center justify-between gap-4">
                 <div>
                   <CardTitle className="font-heading text-2xl font-bold">Fazer uma reserva</CardTitle>
                   <CardDescription className="mt-1 text-haus-ink/55">Leva menos de dois minutos.</CardDescription>
                 </div>
-                <span className="hidden rounded-full bg-haus-sage/12 px-3 py-1.5 text-xs font-semibold text-haus-sage sm:inline-flex">Até 12 meses</span>
+                <div className="hidden items-center gap-2 sm:flex" aria-label={checked ? 'Etapa 2 de 2' : 'Etapa 1 de 2'}>
+                  <span className="grid size-6 place-items-center rounded-full bg-haus-ink text-[11px] font-bold text-white">1</span>
+                  <span className="h-px w-5 bg-black/15" />
+                  <span className={`grid size-6 place-items-center rounded-full text-[11px] font-bold ${checked ? 'bg-haus-terracotta text-white' : 'bg-black/7 text-black/35'}`}>2</span>
+                </div>
               </div>
             </CardHeader>
             <CardContent className="px-5 py-5 sm:px-7 sm:py-6">
               {result ? (
-                <div className="py-5 text-center" role="status">
+                <output className="block py-5 text-center">
                   <span className="mx-auto grid size-16 place-items-center rounded-full bg-haus-sage/10 text-haus-sage"><CheckCircle2 className="size-8" /></span>
                   <h2 className="mt-5 font-heading text-2xl font-bold">
                     {result.status === 'confirmed' ? 'Reserva confirmada!' : 'Solicitação enviada!'}
@@ -203,7 +206,7 @@ export default function Home() {
                   <Button type="button" variant="outline" className="mt-6" onClick={() => { setResult(null); setChecked(false); }}>
                     Fazer outra reserva
                   </Button>
-                </div>
+                </output>
               ) : (
               <form onSubmit={checkAvailability} className="space-y-6">
                 <fieldset>
@@ -277,14 +280,14 @@ export default function Home() {
 
                 {checked && (
                   <div className="space-y-5">
-                    <div className="rounded-xl border border-haus-sage/25 bg-haus-sage/[0.07] p-4" role="status">
+                    <output className="block rounded-xl border border-haus-sage/25 bg-haus-sage/[0.07] p-4">
                       <p className="flex items-center gap-2 font-semibold text-haus-sage"><ShieldCheck className="size-5" /> Horário disponível</p>
                       <p className="mt-1 text-sm text-haus-ink/60">
                         {partySize <= 20
                           ? 'Preencha seus dados para confirmar a reserva automaticamente.'
                           : 'Preencha seus dados para enviar o grupo à aprovação da equipe.'}
                       </p>
-                    </div>
+                    </output>
 
                     <div className="grid gap-4 sm:grid-cols-2">
                       <div className="space-y-2">
@@ -327,7 +330,7 @@ export default function Home() {
         </div>
       </section>
 
-      <section className="bg-[#f7f2e8] px-5 py-12 sm:px-8">
+      <section className="bg-[#efede8] px-5 py-12 sm:px-8">
         <div className="mx-auto grid max-w-7xl gap-5 sm:grid-cols-3">
           {[
             { icon: Clock3, title: 'Chegue no horário', text: 'Sua mesa fica reservada por 10 minutos após o horário escolhido.' },

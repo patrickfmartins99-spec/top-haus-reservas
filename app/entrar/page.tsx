@@ -3,8 +3,9 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { signInWithEmailAndPassword } from 'firebase/auth';
-import { LockKeyhole, UtensilsCrossed } from 'lucide-react';
+import { Check, LoaderCircle, LockKeyhole } from 'lucide-react';
 
+import { BrandLogo } from '@/components/brand-logo';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -19,7 +20,7 @@ export default function LoginPage() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
-  async function signIn(event: React.FormEvent<HTMLFormElement>) {
+  async function signIn(event: React.SyntheticEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!isFirebaseConfigured) {
       setError('Conecte o projeto Firebase para habilitar o acesso dos colaboradores.');
@@ -44,23 +45,45 @@ export default function LoginPage() {
   }
 
   return (
-    <main className="grid min-h-screen place-items-center bg-haus-ink px-5 py-10 text-haus-ink">
-      <div className="absolute inset-0 overflow-hidden" aria-hidden="true"><div className="absolute left-1/2 top-1/2 size-[36rem] -translate-x-1/2 -translate-y-1/2 rounded-full border border-haus-gold/10" /><div className="absolute left-1/2 top-1/2 size-[26rem] -translate-x-1/2 -translate-y-1/2 rounded-full border border-haus-gold/10" /></div>
-      <Card className="relative w-full max-w-md bg-[#fffdf8] py-2 shadow-2xl ring-0">
-        <CardHeader className="items-center pb-2 text-center">
-          <span className="mb-3 grid size-12 place-items-center rounded-full bg-haus-ink text-haus-gold"><UtensilsCrossed className="size-5" /></span>
-          <CardTitle className="font-heading text-2xl font-bold">Acesso da equipe</CardTitle>
-          <CardDescription>Entre com o seu usuário individual do Top Haus.</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <form onSubmit={signIn} className="space-y-4">
-            <div className="space-y-2"><Label htmlFor="username">Usuário</Label><Input id="username" type="text" value={username} onChange={(event) => setUsername(event.target.value.toLowerCase())} className="h-11 bg-white" autoCapitalize="none" autoCorrect="off" autoComplete="username" placeholder="Ex.: patrickf" required /></div>
-            <div className="space-y-2"><Label htmlFor="password">Senha</Label><Input id="password" type="password" value={password} onChange={(event) => setPassword(event.target.value)} className="h-11 bg-white" required /></div>
-            {error && <p className="rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive" role="alert">{error}</p>}
-            <Button type="submit" disabled={loading} className="h-11 w-full bg-haus-terracotta text-white hover:bg-haus-terracotta/90"><LockKeyhole className="size-4" /> {loading ? 'Entrando...' : 'Entrar no painel'}</Button>
-          </form>
-        </CardContent>
-      </Card>
+    <main className="min-h-screen bg-[#efede8] text-haus-ink">
+      <div className="grid min-h-screen lg:grid-cols-[1.05fr_0.95fr]">
+        <section className="relative hidden overflow-hidden bg-black p-12 text-white lg:flex lg:flex-col">
+          <div className="absolute -bottom-48 -left-40 size-[34rem] rounded-full border border-haus-gold/15" aria-hidden="true" />
+          <div className="absolute -bottom-24 -left-24 size-[24rem] rounded-full border border-haus-gold/15" aria-hidden="true" />
+          <BrandLogo priority className="relative rounded-lg" />
+          <div className="relative my-auto max-w-lg py-12">
+            <p className="text-xs font-bold uppercase tracking-[0.2em] text-haus-gold">Ambiente interno</p>
+            <h1 className="mt-4 text-5xl font-extrabold leading-[1.05] tracking-[-0.04em]">A operação do salão em um só lugar.</h1>
+            <p className="mt-6 max-w-md text-lg leading-8 text-white/55">Reservas, aprovações e fila de espera organizadas para toda a equipe.</p>
+            <div className="mt-10 space-y-4 text-sm text-white/65">
+              <p className="flex items-center gap-3"><span className="grid size-7 place-items-center rounded-full bg-white/10"><Check className="size-4 text-haus-gold" /></span> Acesso individual por colaborador</p>
+              <p className="flex items-center gap-3"><span className="grid size-7 place-items-center rounded-full bg-white/10"><Check className="size-4 text-haus-gold" /></span> Histórico de alterações e aprovações</p>
+              <p className="flex items-center gap-3"><span className="grid size-7 place-items-center rounded-full bg-white/10"><Check className="size-4 text-haus-gold" /></span> Experiência preparada para celular e tablet</p>
+            </div>
+          </div>
+          <p className="relative text-xs text-white/30">Top Haus · Sistema de reservas</p>
+        </section>
+
+        <section className="flex min-h-screen items-center justify-center px-5 py-10 sm:px-10">
+          <Card className="w-full max-w-md border-0 bg-[#fdfcf9] py-2 shadow-[0_24px_70px_rgba(0,0,0,0.12)] ring-black/5">
+            <CardHeader className="pb-3">
+              <BrandLogo compact priority className="mb-5 rounded-md lg:hidden" />
+              <p className="text-xs font-bold uppercase tracking-[0.16em] text-haus-terracotta">Acesso do colaborador</p>
+              <CardTitle className="mt-2 text-3xl font-extrabold tracking-[-0.03em]">Bem-vindo de volta.</CardTitle>
+              <CardDescription className="mt-1 leading-6">Entre com o seu usuário individual para acessar as reservas.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <form onSubmit={signIn} className="space-y-5">
+                <div className="space-y-2"><Label htmlFor="username">Usuário</Label><Input id="username" type="text" value={username} onChange={(event) => setUsername(event.target.value.toLowerCase())} className="h-12 bg-white" autoCapitalize="none" autoCorrect="off" autoComplete="username" placeholder="Ex.: patrickf" required /></div>
+                <div className="space-y-2"><div className="flex items-center justify-between"><Label htmlFor="password">Senha</Label><span className="text-xs text-black/40">Mínimo de 8 caracteres</span></div><Input id="password" type="password" value={password} onChange={(event) => setPassword(event.target.value)} className="h-12 bg-white" autoComplete="current-password" required /></div>
+                {error && <p className="rounded-xl bg-destructive/10 px-4 py-3 text-sm text-destructive" role="alert">{error}</p>}
+                <Button type="submit" disabled={loading} className="h-12 w-full bg-black text-base font-bold text-white hover:bg-black/85">{loading ? <LoaderCircle className="size-5 animate-spin" /> : <LockKeyhole className="size-5" />} {loading ? 'Entrando...' : 'Entrar no painel'}</Button>
+                <p className="text-center text-xs leading-5 text-black/40">Problemas com o acesso? Solicite a redefinição da senha ao administrador.</p>
+              </form>
+            </CardContent>
+          </Card>
+        </section>
+      </div>
     </main>
   );
 }

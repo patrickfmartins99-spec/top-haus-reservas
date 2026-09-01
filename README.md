@@ -36,7 +36,12 @@ Nunca envie ou salve a chave privada da conta de serviço no GitHub. No Netlify,
 
 ## Implantação no Netlify
 
-O arquivo `netlify.toml` já define o comando de build e a saída do Next.js. Depois de conectar o repositório no Netlify, cadastre as mesmas variáveis de ambiente e execute uma implantação de teste antes de publicar em produção.
+O arquivo `netlify.toml` já define o comando de build e a saída do Next.js. Conecte o mesmo repositório a dois projetos no Netlify:
+
+- Site do cliente: configure `APP_SURFACE=cliente`.
+- Site do colaborador: configure `APP_SURFACE=colaborador`.
+
+Depois, cadastre as demais variáveis de ambiente e execute uma implantação de teste antes de publicar em produção.
 
 ## Documentação do produto
 
