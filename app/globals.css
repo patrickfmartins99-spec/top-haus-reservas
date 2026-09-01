@@ -10,10 +10,10 @@
   --font-sans: var(--font-body);
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   --font-heading: var(--font-display);
-  --color-haus-ink: #111111;
-  --color-haus-gold: #b78a62;
-  --color-haus-terracotta: #795137;
-  --color-haus-sage: #665548;
+  --color-haus-ink: #000000;
+  --color-haus-gold: #d0a06d;
+  --color-haus-terracotta: #8c4b28;
+  --color-haus-sage: #4f463f;
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -58,9 +58,9 @@ body { font-family: var(--font-body); }
   --font-body: ui-rounded, "SF Pro Rounded", "Segoe UI", Inter, Arial, sans-serif;
   --font-display: ui-rounded, "SF Pro Rounded", "Segoe UI", Inter, Arial, sans-serif;
   --background: #f7f6f2;
-  --foreground: #111111;
+  --foreground: #000000;
   --card: #ffffff;
-  --card-foreground: #111111;
+  --card-foreground: #000000;
   --popover: oklch(1 0 0);
   --popover-foreground: oklch(0.145 0 0);
   --primary: #1f2420;
@@ -74,7 +74,7 @@ body { font-family: var(--font-body); }
   --destructive: oklch(0.577 0.245 27.325);
   --border: oklch(0.922 0 0);
   --input: oklch(0.922 0 0);
-  --ring: #795137;
+  --ring: #8c4b28;
   --chart-1: oklch(0.87 0 0);
   --chart-2: oklch(0.556 0 0);
   --chart-3: oklch(0.439 0 0);

@@ -33,8 +33,8 @@ export default function DemoReservationPage() {
     <main className="min-h-screen bg-[#efede8] text-haus-ink">
       <header className="border-b border-white/10 bg-black text-white">
         <div className="mx-auto flex h-20 max-w-7xl items-center justify-between px-5 sm:px-8">
-          <div className="flex items-center gap-3"><BrandLogo compact priority className="rounded-md" /><span className="hidden border-l border-white/10 pl-3 text-sm text-white/60 sm:block">Detalhes da reserva</span></div>
-          <Link href="/painel" className="flex items-center gap-2 text-sm font-medium text-white/65 transition hover:text-white"><ArrowLeft className="size-4" /> Voltar ao painel</Link>
+          <div className="flex items-center gap-3"><BrandLogo compact priority className="rounded-md" /><span className="hidden border-l border-white/20 pl-3 text-sm text-white/85 sm:block">Detalhes da reserva</span></div>
+          <Link href="/painel" className="flex items-center gap-2 text-sm font-medium text-white/85 transition hover:text-white"><ArrowLeft className="size-4" /> Voltar ao painel</Link>
         </div>
       </header>
 
@@ -66,7 +66,7 @@ export default function DemoReservationPage() {
 
           <aside className="space-y-6">
             <Card className="bg-black text-white ring-0">
-              <CardHeader><CardTitle className="text-xl font-bold">Atualizar situação</CardTitle><p className="text-sm leading-6 text-white/50">Escolha a ação que representa o atendimento atual.</p></CardHeader>
+              <CardHeader><CardTitle className="text-xl font-bold">Atualizar situação</CardTitle><p className="text-sm leading-6 text-white/80">Escolha a ação que representa o atendimento atual.</p></CardHeader>
               <CardContent className="space-y-3">
                 <Button type="button" onClick={() => setStatus('Cliente chegou')} className="h-11 w-full bg-white text-black hover:bg-white/85"><Check /> Marcar chegada</Button>
                 <Button type="button" onClick={() => setStatus('Não compareceu')} variant="outline" className="h-11 w-full border-white/15 bg-white/5 text-white hover:bg-white/10"><Clock3 /> Não compareceu</Button>

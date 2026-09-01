@@ -36,7 +36,7 @@ export default function MinhaReservaPage() {
           <Link href="/" aria-label="Top Haus — página inicial">
             <BrandLogo compact priority className="rounded-md" />
           </Link>
-          <Link href="/" className="flex items-center gap-2 text-sm font-medium text-white/70 transition hover:text-white">
+          <Link href="/" className="flex items-center gap-2 text-sm font-medium text-white/90 transition hover:text-white">
             <ArrowLeft className="size-4" /> Voltar para reservas
           </Link>
         </div>

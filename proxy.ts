@@ -2,7 +2,17 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
 export function proxy(request: NextRequest) {
-  const surface = process.env.APP_SURFACE;
+  const configuredSurface = process.env.APP_SURFACE;
+  const hostname = (request.headers.get('host') ?? request.nextUrl.hostname)
+    .split(':')[0]
+    .toLowerCase();
+  const surface = configuredSurface === 'cliente' || configuredSurface === 'colaborador'
+    ? configuredSurface
+    : hostname.startsWith('cliente.') || hostname.startsWith('cliente-')
+      ? 'cliente'
+      : hostname === 'reservastophaus.netlify.app' || hostname.endsWith('--reservastophaus.netlify.app')
+        ? 'colaborador'
+        : undefined;
   const { pathname } = request.nextUrl;
 
   if (surface === 'colaborador') {

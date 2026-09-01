@@ -41,7 +41,13 @@ O arquivo `netlify.toml` já define o comando de build e a saída do Next.js. Co
 - Site do cliente: configure `APP_SURFACE=cliente`.
 - Site do colaborador: configure `APP_SURFACE=colaborador`.
 
+No endereço principal `reservastophaus.netlify.app`, a aplicação também reconhece automaticamente a experiência do colaborador quando a variável ainda não foi cadastrada. O site público do cliente deve usar um endereço iniciado por `cliente.` ou `cliente-` e manter `APP_SURFACE=cliente`.
+
 Depois, cadastre as demais variáveis de ambiente e execute uma implantação de teste antes de publicar em produção.
+
+O endereço `/api/status` verifica no servidor se Firebase Authentication e Firestore estão realmente acessíveis. A página de entrada da equipe exibe esse resultado sem revelar nenhuma credencial.
+
+Para mensagens automáticas, use a API oficial WhatsApp Business Platform da Meta. O número sozinho não é suficiente: as variáveis `WHATSAPP_*` precisam ser cadastradas no Netlify e os modelos de confirmação, aprovação e lembrete devem estar aprovados pela Meta.
 
 ## Documentação do produto
 

@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import './globals.css';
 
-const isStaffSurface = process.env.APP_SURFACE === 'colaborador';
+const isStaffSurface = process.env.APP_SURFACE !== 'cliente';
 
 export const metadata: Metadata = {
   metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL ?? 'http://localhost:3000'),
@@ -21,8 +21,10 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'Reservas | Top Haus Restaurante',
-    description: 'Reserve seu almoço ou rodízio no Top Haus Restaurante.',
+    title: isStaffSurface ? 'Equipe | Top Haus Reservas' : 'Reservas | Top Haus Restaurante',
+    description: isStaffSurface
+      ? 'Ambiente interno para gestão de reservas do Top Haus.'
+      : 'Reserve seu almoço ou rodízio no Top Haus Restaurante.',
     images: ['/og.png'],
   },
 };

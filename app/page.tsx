@@ -134,7 +134,7 @@ export default function Home() {
             <BrandLogo compact priority className="rounded-md" />
             <span className="hidden border-l border-white/15 pl-3 sm:block">
               <span className="block text-sm font-semibold">Reservas</span>
-              <span className="block text-[10px] uppercase tracking-[0.18em] text-white/45">Cliente</span>
+              <span className="block text-[10px] uppercase tracking-[0.18em] text-white/75">Cliente</span>
             </span>
           </a>
           <Link
@@ -162,10 +162,10 @@ export default function Home() {
             <h1 className="font-heading text-4xl font-extrabold leading-[1.04] tracking-[-0.035em] sm:text-5xl lg:text-6xl">
               Sua mesa no Top Haus, sem complicação.
             </h1>
-            <p className="mt-6 max-w-lg text-base leading-7 text-white/65 sm:text-lg">
+            <p className="mt-6 max-w-lg text-base leading-7 text-white/85 sm:text-lg">
               Escolha o almoço ou o rodízio, informe o tamanho do grupo e encontre o melhor horário para sua visita.
             </p>
-            <div className="mt-8 flex flex-wrap gap-x-6 gap-y-3 text-sm text-white/70">
+            <div className="mt-8 flex flex-wrap gap-x-6 gap-y-3 text-sm text-white/90">
               <span className="flex items-center gap-2"><Check className="size-4 text-haus-gold" /> Confirmação pelo WhatsApp</span>
               <span className="flex items-center gap-2"><Check className="size-4 text-haus-gold" /> Sem necessidade de cadastro</span>
             </div>

@@ -55,7 +55,7 @@ export default function DashboardPage() {
         <aside className="hidden border-r border-black/7 bg-haus-ink px-4 py-6 text-white lg:flex lg:flex-col">
           <div className="flex items-center gap-3 px-2">
             <BrandLogo compact priority className="rounded-md" />
-            <div className="border-l border-white/10 pl-3"><p className="text-sm font-bold">Reservas</p><p className="text-[10px] uppercase tracking-[0.16em] text-white/40">Equipe</p></div>
+            <div className="border-l border-white/20 pl-3"><p className="text-sm font-bold">Reservas</p><p className="text-[10px] uppercase tracking-[0.16em] text-white/75">Equipe</p></div>
           </div>
           <nav className="mt-10 space-y-1 text-sm">
             {[
@@ -67,12 +67,12 @@ export default function DashboardPage() {
               { icon: Settings, label: 'Configurações' },
             ].map(({ icon: Icon, label, active, count, href }) => {
               const content = <><Icon className="size-4" />{label}{count ? <span className="ml-auto rounded-full bg-haus-terracotta px-2 py-0.5 text-[10px] font-bold text-white">{count}</span> : null}</>;
-              const className = `flex items-center gap-3 rounded-lg px-3 py-2.5 ${active ? 'bg-white/10 text-white' : 'text-white/55 hover:bg-white/5 hover:text-white'}`;
+              const className = `flex items-center gap-3 rounded-lg px-3 py-2.5 ${active ? 'bg-white/15 text-white' : 'text-white/80 hover:bg-white/10 hover:text-white'}`;
               return href ? <Link key={label} href={href} className={className}>{content}</Link> : <a key={label} href="#" className={className}>{content}</a>;
             })}
           </nav>
           <div className="mt-auto border-t border-white/10 pt-4">
-            <button className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm text-white/55 hover:bg-white/5"><LogOut className="size-4" /> Sair</button>
+            <button className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm text-white/80 hover:bg-white/10"><LogOut className="size-4" /> Sair</button>
           </div>
         </aside>
 

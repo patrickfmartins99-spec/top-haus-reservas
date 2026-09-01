@@ -1,9 +1,9 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { signInWithEmailAndPassword } from 'firebase/auth';
-import { Check, LoaderCircle, LockKeyhole } from 'lucide-react';
+import { Check, CircleAlert, CloudCheck, LoaderCircle, LockKeyhole } from 'lucide-react';
 
 import { BrandLogo } from '@/components/brand-logo';
 import { Button } from '@/components/ui/button';
@@ -19,6 +19,22 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [firebaseStatus, setFirebaseStatus] = useState<'checking' | 'connected' | 'not_configured' | 'error'>('checking');
+
+  useEffect(() => {
+    let active = true;
+    fetch('/api/status', { cache: 'no-store' })
+      .then((response) => response.json())
+      .then((data: { firebase?: 'connected' | 'not_configured' | 'error' }) => {
+        if (active) setFirebaseStatus(data.firebase ?? 'error');
+      })
+      .catch(() => {
+        if (active) setFirebaseStatus('error');
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   async function signIn(event: React.SyntheticEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -54,14 +70,14 @@ export default function LoginPage() {
           <div className="relative my-auto max-w-lg py-12">
             <p className="text-xs font-bold uppercase tracking-[0.2em] text-haus-gold">Ambiente interno</p>
             <h1 className="mt-4 text-5xl font-extrabold leading-[1.05] tracking-[-0.04em]">A operação do salão em um só lugar.</h1>
-            <p className="mt-6 max-w-md text-lg leading-8 text-white/55">Reservas, aprovações e fila de espera organizadas para toda a equipe.</p>
-            <div className="mt-10 space-y-4 text-sm text-white/65">
+            <p className="mt-6 max-w-md text-lg leading-8 text-white/80">Reservas, aprovações e fila de espera organizadas para toda a equipe.</p>
+            <div className="mt-10 space-y-4 text-sm text-white/85">
               <p className="flex items-center gap-3"><span className="grid size-7 place-items-center rounded-full bg-white/10"><Check className="size-4 text-haus-gold" /></span> Acesso individual por colaborador</p>
               <p className="flex items-center gap-3"><span className="grid size-7 place-items-center rounded-full bg-white/10"><Check className="size-4 text-haus-gold" /></span> Histórico de alterações e aprovações</p>
               <p className="flex items-center gap-3"><span className="grid size-7 place-items-center rounded-full bg-white/10"><Check className="size-4 text-haus-gold" /></span> Experiência preparada para celular e tablet</p>
             </div>
           </div>
-          <p className="relative text-xs text-white/30">Top Haus · Sistema de reservas</p>
+          <p className="relative text-xs text-white/60">Top Haus · Sistema de reservas</p>
         </section>
 
         <section className="flex min-h-screen items-center justify-center px-5 py-10 sm:px-10">
@@ -71,6 +87,22 @@ export default function LoginPage() {
               <p className="text-xs font-bold uppercase tracking-[0.16em] text-haus-terracotta">Acesso do colaborador</p>
               <CardTitle className="mt-2 text-3xl font-extrabold tracking-[-0.03em]">Bem-vindo de volta.</CardTitle>
               <CardDescription className="mt-1 leading-6">Entre com o seu usuário individual para acessar as reservas.</CardDescription>
+              <div className={`mt-4 flex items-center gap-2 rounded-xl border px-3 py-2.5 text-xs font-semibold ${
+                firebaseStatus === 'connected'
+                  ? 'border-emerald-700/20 bg-emerald-50 text-emerald-800'
+                  : firebaseStatus === 'checking'
+                    ? 'border-black/10 bg-black/[0.03] text-black/60'
+                    : 'border-amber-700/20 bg-amber-50 text-amber-900'
+              }`}>
+                {firebaseStatus === 'checking' ? <LoaderCircle className="size-4 animate-spin" /> : firebaseStatus === 'connected' ? <CloudCheck className="size-4" /> : <CircleAlert className="size-4" />}
+                {firebaseStatus === 'checking'
+                  ? 'Verificando conexão com o Firebase...'
+                  : firebaseStatus === 'connected'
+                    ? 'Firebase conectado e pronto'
+                    : firebaseStatus === 'not_configured'
+                      ? 'Firebase ainda não configurado no Netlify'
+                      : 'Não foi possível acessar o Firebase'}
+              </div>
             </CardHeader>
             <CardContent>
               <form onSubmit={signIn} className="space-y-5">

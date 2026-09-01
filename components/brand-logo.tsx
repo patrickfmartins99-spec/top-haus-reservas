@@ -23,7 +23,7 @@ export function BrandLogo({ className, priority = false, compact = false }: Bran
         fill
         priority={priority}
         sizes={compact ? '72px' : '100px'}
-        className="object-contain"
+        className="object-contain contrast-[1.7] brightness-105"
       />
     </span>
   );
