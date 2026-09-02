@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { onAuthStateChanged, type User } from 'firebase/auth';
-import { Check, Clock3, LoaderCircle, MessageCircle, PhoneCall, Plus, UserRoundX, Users } from 'lucide-react';
+import { Check, Clock3, LoaderCircle, MessageCircle, Pencil, PhoneCall, Plus, Save, UserRoundX, Users } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -56,6 +56,7 @@ export default function WaitlistPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [editingEntry, setEditingEntry] = useState<QueueEntry | null>(null);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [customerName, setCustomerName] = useState('');
@@ -88,23 +89,49 @@ export default function WaitlistPage() {
 
   const activeQueue = useMemo(() => queue.filter((entry) => entry.status === 'waiting' || entry.status === 'called'), [queue]);
 
-  async function addEntry(event: React.SyntheticEvent<HTMLFormElement>) {
+  function openNewEntry() {
+    setEditingEntry(null);
+    setCustomerName('');
+    setWhatsapp('');
+    setPartySize('2');
+    setEstimatedMinutes('15');
+    setSeatingPreference('sem_preferencia');
+    setError('');
+    setSuccess('');
+    setDialogOpen(true);
+  }
+
+  function openEditEntry(entry: QueueEntry) {
+    setEditingEntry(entry);
+    setCustomerName(entry.customerName);
+    setWhatsapp(entry.whatsapp);
+    setPartySize(String(entry.partySize));
+    setEstimatedMinutes(String(entry.estimatedMinutes));
+    setSeatingPreference(entry.seatingPreference);
+    setError('');
+    setSuccess('');
+    setDialogOpen(true);
+  }
+
+  async function saveEntry(event: React.SyntheticEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!currentUser) return;
     setSaving(true); setError(''); setSuccess('');
     try {
-      const response = await staffRequest(currentUser, '/api/fila', {
-        method: 'POST',
+      const response = await staffRequest(currentUser, editingEntry ? `/api/fila/${editingEntry.id}` : '/api/fila', {
+        method: editingEntry ? 'PATCH' : 'POST',
         body: JSON.stringify({ customerName, whatsapp, partySize: Number(partySize), estimatedMinutes: Number(estimatedMinutes), seatingPreference }),
       });
       const data = await response.json();
-      if (!response.ok) throw new Error(data.error ?? 'Não foi possível adicionar o cliente.');
+      if (!response.ok) throw new Error(data.error ?? 'Não foi possível salvar o cliente.');
+      const edited = Boolean(editingEntry);
       setCustomerName(''); setWhatsapp(''); setPartySize('2'); setEstimatedMinutes('15'); setSeatingPreference('sem_preferencia');
+      setEditingEntry(null);
       setDialogOpen(false);
-      setSuccess('Cliente adicionado à fila. O WhatsApp ficou registrado para a notificação.');
+      setSuccess(edited ? 'Dados do cliente atualizados com sucesso.' : 'Cliente adicionado à fila. O WhatsApp ficou registrado para a notificação.');
       await loadQueue(currentUser);
     } catch (caughtError) {
-      setError(caughtError instanceof Error ? caughtError.message : 'Não foi possível adicionar o cliente.');
+      setError(caughtError instanceof Error ? caughtError.message : 'Não foi possível salvar o cliente.');
     } finally { setSaving(false); }
   }
 
@@ -124,9 +151,9 @@ export default function WaitlistPage() {
 
   return (
     <div className="mx-auto max-w-6xl space-y-6 p-5 sm:p-8">
-      <div className="flex flex-wrap items-end justify-between gap-4"><div><p className="text-xs font-bold uppercase tracking-[0.16em] text-haus-terracotta">Atendimento sem reserva</p><h1 className="mt-2 text-3xl font-extrabold tracking-[-0.03em]">Fila de espera</h1><p className="mt-1 text-sm text-black/55">Registre os dados do cliente e acompanhe a ordem de atendimento.</p></div><Button className="bg-black text-white hover:bg-black/85" onClick={() => { setDialogOpen(true); setError(''); }}><Plus /> Adicionar à fila</Button></div>
+      <div className="flex flex-wrap items-end justify-between gap-4"><div><p className="text-xs font-bold uppercase tracking-[0.16em] text-haus-terracotta">Atendimento sem reserva</p><h1 className="mt-2 text-3xl font-extrabold tracking-[-0.03em]">Fila de espera</h1><p className="mt-1 text-sm text-black/65">Registre os dados do cliente e acompanhe a ordem de atendimento.</p></div><Button className="bg-black text-white hover:bg-black/85" onClick={openNewEntry}><Plus /> Adicionar à fila</Button></div>
 
-      <div className="rounded-xl border border-haus-gold/35 bg-[#f4e7d7] px-4 py-3 text-sm text-black/65"><strong>WhatsApp:</strong> o número já é obrigatório e fica salvo. O envio automático será ativado quando conectarmos o provedor de mensagens.</div>
+      <div className="rounded-xl border border-haus-gold/45 bg-[#f4e7d7] px-4 py-3 text-sm text-black/75"><strong>WhatsApp:</strong> o número já é obrigatório e fica salvo. O envio automático será ativado quando conectarmos o provedor de mensagens.</div>
       {error ? <p className="rounded-xl bg-destructive/10 px-4 py-3 text-sm font-medium text-destructive" role="alert">{error}</p> : null}
       {success ? <output className="block rounded-xl bg-black px-4 py-3 text-sm font-medium text-white">{success}</output> : null}
 
@@ -134,18 +161,19 @@ export default function WaitlistPage() {
         { label: 'Aguardando', value: activeQueue.filter((item) => item.status === 'waiting').length, icon: Clock3 },
         { label: 'Pessoas na fila', value: activeQueue.reduce((sum, item) => sum + item.partySize, 0), icon: Users },
         { label: 'Tempo estimado', value: activeQueue.length ? `${Math.max(...activeQueue.map((item) => item.estimatedMinutes))} min` : '—', icon: MessageCircle },
-      ].map(({ label, value, icon: Icon }) => <Card key={label} className="bg-white ring-black/7"><CardContent className="flex items-center justify-between"><div><p className="text-sm text-black/50">{label}</p><p className="mt-2 text-2xl font-extrabold">{value}</p></div><span className="grid size-10 place-items-center rounded-xl bg-[#eadcd2] text-haus-terracotta"><Icon /></span></CardContent></Card>)}</div>
+      ].map(({ label, value, icon: Icon }) => <Card key={label} className="bg-white ring-black/7"><CardContent className="flex items-center justify-between"><div><p className="text-sm text-black/65">{label}</p><p className="mt-2 text-2xl font-extrabold">{value}</p></div><span className="grid size-10 place-items-center rounded-xl bg-[#eadcd2] text-haus-terracotta"><Icon /></span></CardContent></Card>)}</div>
 
-      <Card className="bg-white ring-black/7"><CardHeader className="border-b border-black/7"><CardTitle>Ordem de atendimento</CardTitle><p className="text-sm text-black/50">Dados salvos no Firebase e compartilhados com toda a equipe.</p></CardHeader><CardContent className="space-y-3">
-        {loading ? <p className="flex items-center justify-center gap-2 py-10 text-sm text-black/50"><LoaderCircle className="size-4 animate-spin" /> Carregando fila...</p> : null}
-        {!loading && activeQueue.length === 0 ? <p className="py-10 text-center text-sm text-black/50">Nenhum cliente aguardando no momento.</p> : null}
-        {activeQueue.map((entry, index) => <article key={entry.id} className={`flex flex-col gap-4 rounded-xl border p-4 sm:flex-row sm:items-center ${entry.status === 'called' ? 'border-haus-terracotta/35 bg-[#f4e7d7]' : 'border-black/8'}`}><span className="grid size-9 shrink-0 place-items-center rounded-full bg-black text-sm font-bold text-white">{index + 1}</span><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><p className="font-bold">{entry.customerName}</p><Badge className={entry.status === 'called' ? 'bg-haus-terracotta text-white' : 'bg-[#e7e1db] text-[#4f3528]'}>{statusLabel[entry.status]}</Badge></div><p className="mt-1 text-sm text-black/50">{entry.partySize} pessoas · {entry.estimatedMinutes} min · {formatPhone(entry.whatsapp)}</p></div><div className="flex flex-wrap gap-2">{entry.status === 'waiting' ? <Button disabled={saving} onClick={() => updateStatus(entry, 'called')} className="bg-haus-terracotta text-white hover:bg-haus-terracotta/90"><PhoneCall /> Chamar</Button> : null}{entry.status === 'called' ? <Button disabled={saving} onClick={() => updateStatus(entry, 'seated')} className="bg-black text-white hover:bg-black/85"><Check /> Marcar atendido</Button> : null}<Button disabled={saving} variant="outline" onClick={() => updateStatus(entry, 'removed')}><UserRoundX /> Remover</Button></div></article>)}
+      <Card className="bg-white ring-black/7"><CardHeader className="border-b border-black/7"><CardTitle>Ordem de atendimento</CardTitle><p className="text-sm text-black/65">Dados salvos no Firebase e compartilhados com toda a equipe.</p></CardHeader><CardContent className="space-y-3">
+        {loading ? <p className="flex items-center justify-center gap-2 py-10 text-sm text-black/65"><LoaderCircle className="size-4 animate-spin" /> Carregando fila...</p> : null}
+        {!loading && activeQueue.length === 0 ? <p className="py-10 text-center text-sm text-black/65">Nenhum cliente aguardando no momento.</p> : null}
+        {activeQueue.map((entry, index) => <article key={entry.id} className={`flex flex-col gap-4 rounded-xl border p-4 sm:flex-row sm:items-center ${entry.status === 'called' ? 'border-haus-terracotta/35 bg-[#f4e7d7]' : 'border-black/8'}`}><span className="grid size-9 shrink-0 place-items-center rounded-full bg-black text-sm font-bold text-white">{index + 1}</span><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><p className="font-bold">{entry.customerName}</p><Badge className={entry.status === 'called' ? 'bg-haus-terracotta text-white' : 'bg-[#e7e1db] text-[#4f3528]'}>{statusLabel[entry.status]}</Badge></div><p className="mt-1 text-sm font-medium text-black/70">{entry.partySize} pessoas · {entry.estimatedMinutes} min · {formatPhone(entry.whatsapp)}</p></div><div className="flex flex-wrap gap-2"><Button disabled={saving} variant="outline" onClick={() => openEditEntry(entry)}><Pencil /> Editar</Button>{entry.status === 'waiting' ? <Button disabled={saving} onClick={() => updateStatus(entry, 'called')} className="bg-haus-terracotta text-white hover:bg-haus-terracotta/90"><PhoneCall /> Chamar</Button> : null}{entry.status === 'called' ? <Button disabled={saving} onClick={() => updateStatus(entry, 'seated')} className="bg-black text-white hover:bg-black/85"><Check /> Marcar atendido</Button> : null}<Button disabled={saving} variant="outline" onClick={() => updateStatus(entry, 'removed')}><UserRoundX /> Remover</Button></div></article>)}
       </CardContent></Card>
 
-      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+      <Dialog open={dialogOpen} onOpenChange={(open) => { setDialogOpen(open); if (!open) setEditingEntry(null); }}>
         <DialogContent className="sm:max-w-lg">
-          <form onSubmit={addEntry}>
-            <DialogHeader><DialogTitle className="text-xl font-bold">Adicionar cliente à fila</DialogTitle><DialogDescription>Informe os dados necessários para identificar e avisar o cliente.</DialogDescription></DialogHeader>
+          <form onSubmit={saveEntry}>
+            <DialogHeader><DialogTitle className="text-xl font-bold">{editingEntry ? 'Editar cliente da fila' : 'Adicionar cliente à fila'}</DialogTitle><DialogDescription className="text-black/65">{editingEntry ? 'As alterações ficarão registradas na auditoria.' : 'Informe os dados necessários para identificar e avisar o cliente.'}</DialogDescription></DialogHeader>
+            {error ? <p className="mt-4 rounded-xl bg-destructive/10 px-4 py-3 text-sm font-medium text-destructive" role="alert">{error}</p> : null}
             <div className="grid gap-4 py-5 sm:grid-cols-2">
               <div className="space-y-2 sm:col-span-2"><Label htmlFor="queue-name">Nome do cliente</Label><Input id="queue-name" value={customerName} onChange={(event) => setCustomerName(event.target.value)} minLength={2} required /></div>
               <div className="space-y-2 sm:col-span-2"><Label htmlFor="queue-whatsapp">WhatsApp</Label><Input id="queue-whatsapp" value={whatsapp} onChange={(event) => setWhatsapp(event.target.value)} placeholder="(47) 99999-9999" inputMode="tel" minLength={10} required /></div>
@@ -153,7 +181,7 @@ export default function WaitlistPage() {
               <div className="space-y-2"><Label htmlFor="queue-estimate">Estimativa (min)</Label><Input id="queue-estimate" type="number" value={estimatedMinutes} onChange={(event) => setEstimatedMinutes(event.target.value)} min={1} required /></div>
               <div className="space-y-2 sm:col-span-2"><Label htmlFor="queue-preference">Preferência</Label><NativeSelect id="queue-preference" value={seatingPreference} onChange={(event) => setSeatingPreference(event.target.value)} className="w-full"><NativeSelectOption value="sem_preferencia">Sem preferência</NativeSelectOption><NativeSelectOption value="sofa">Sofá lateral</NativeSelectOption><NativeSelectOption value="parede_vidro">Parede de vidro</NativeSelectOption><NativeSelectOption value="parede_tomada">Parede com tomada</NativeSelectOption></NativeSelect></div>
             </div>
-            <DialogFooter><Button type="button" variant="outline" onClick={() => setDialogOpen(false)}>Cancelar</Button><Button type="submit" disabled={saving} className="bg-black text-white hover:bg-black/85">{saving ? <LoaderCircle className="animate-spin" /> : <Plus />} Adicionar cliente</Button></DialogFooter>
+            <DialogFooter><Button type="button" variant="outline" onClick={() => setDialogOpen(false)}>Cancelar</Button><Button type="submit" disabled={saving} className="bg-black text-white hover:bg-black/85">{saving ? <LoaderCircle className="animate-spin" /> : editingEntry ? <Save /> : <Plus />} {editingEntry ? 'Salvar alterações' : 'Adicionar cliente'}</Button></DialogFooter>
           </form>
         </DialogContent>
       </Dialog>
