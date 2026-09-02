@@ -25,7 +25,7 @@ import { getFirebaseClient } from '@/lib/firebase/client';
 const navigation = [
   { icon: LayoutDashboard, label: 'Visão geral', href: '/painel' },
   { icon: CalendarDays, label: 'Reservas', href: '/painel/reservas' },
-  { icon: ListOrdered, label: 'Fila de espera', href: '/painel/fila', count: 3 },
+  { icon: ListOrdered, label: 'Fila de espera', href: '/painel/fila' },
   { icon: History, label: 'Auditoria', href: '/painel/auditoria' },
   { icon: UserCog, label: 'Usuários', href: '/painel/usuarios' },
   { icon: Settings, label: 'Configurações', href: '/painel/configuracoes' },
@@ -91,12 +91,11 @@ export function StaffShell({ children }: { children: ReactNode }) {
           </Link>
 
           <nav className="mt-10 space-y-1 text-sm" aria-label="Navegação principal">
-            {navigation.map(({ icon: Icon, label, href, count }) => {
+            {navigation.map(({ icon: Icon, label, href }) => {
               const active = isActive(pathname, href);
               return (
                 <Link key={href} href={href} aria-current={active ? 'page' : undefined} className={`flex items-center gap-3 rounded-lg px-3 py-2.5 transition ${active ? 'bg-[#8c4b28] text-white' : 'text-white/80 hover:bg-white/10 hover:text-white'}`}>
                   <Icon className="size-4" />{label}
-                  {count ? <span className="ml-auto rounded-full bg-white px-2 py-0.5 text-[10px] font-bold text-black">{count}</span> : null}
                 </Link>
               );
             })}
@@ -119,9 +118,9 @@ export function StaffShell({ children }: { children: ReactNode }) {
           </header>
 
           <nav className="flex gap-2 overflow-x-auto border-b border-black/7 bg-white px-5 pb-3 lg:hidden" aria-label="Navegação do painel">
-            {navigation.map(({ label, href, count }) => {
+            {navigation.map(({ label, href }) => {
               const active = isActive(pathname, href);
-              return <Link key={href} href={href} aria-current={active ? 'page' : undefined} className={`whitespace-nowrap rounded-full px-4 py-2 text-xs font-bold transition ${active ? 'bg-black text-white' : 'bg-black/5 text-black/60 hover:bg-black/10'}`}>{label}{count ? ` (${count})` : ''}</Link>;
+              return <Link key={href} href={href} aria-current={active ? 'page' : undefined} className={`whitespace-nowrap rounded-full px-4 py-2 text-xs font-bold transition ${active ? 'bg-black text-white' : 'bg-black/5 text-black/60 hover:bg-black/10'}`}>{label}</Link>;
             })}
           </nav>
 

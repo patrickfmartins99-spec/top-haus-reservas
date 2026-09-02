@@ -11,7 +11,44 @@ import {
   isReservationInput,
   isWithinBookingWindow,
 } from '@/lib/domain/reservations';
+import { requireStaff } from '@/lib/auth/staff-request';
 import { getAdminDatabase } from '@/lib/firebase/admin';
+
+function serializeTimestamp(value: unknown) {
+  if (value && typeof value === 'object' && 'toDate' in value && typeof value.toDate === 'function') {
+    return value.toDate().toISOString();
+  }
+  return null;
+}
+
+export async function GET(request: Request) {
+  const context = await requireStaff(request);
+  if (!context) return NextResponse.json({ error: 'Acesso restrito à equipe.' }, { status: 403 });
+
+  const database = getAdminDatabase();
+  if (!database) return NextResponse.json({ error: 'Firebase não configurado.' }, { status: 503 });
+
+  const snapshot = await database.collection('reservations').orderBy('createdAt', 'desc').limit(300).get();
+  const reservations = snapshot.docs.map((document) => {
+    const data = document.data();
+    return {
+      id: document.id,
+      customerName: String(data.customerName ?? ''),
+      whatsapp: String(data.whatsapp ?? ''),
+      partySize: Number(data.partySize ?? 0),
+      service: String(data.service ?? ''),
+      serviceDate: String(data.serviceDate ?? ''),
+      arrivalTime: String(data.arrivalTime ?? ''),
+      seatingPreference: String(data.seatingPreference ?? 'sem_preferencia'),
+      notes: String(data.notes ?? ''),
+      status: String(data.status ?? 'confirmed'),
+      source: String(data.source ?? 'customer_web'),
+      createdAt: serializeTimestamp(data.createdAt),
+    };
+  });
+
+  return NextResponse.json({ reservations });
+}
 
 export async function POST(request: Request) {
   const payload: unknown = await request.json().catch(() => null);
@@ -27,6 +64,10 @@ export async function POST(request: Request) {
   }
 
   const database = getAdminDatabase();
+  const staffContext = request.headers.get('authorization') ? await requireStaff(request) : null;
+  if (request.headers.get('authorization') && !staffContext) {
+    return NextResponse.json({ error: 'Sua sessão expirou. Entre novamente.' }, { status: 403 });
+  }
   const token = randomBytes(24).toString('hex');
   const status = payload.partySize <= AUTO_APPROVAL_LIMIT ? 'confirmed' : 'pending_approval';
 
@@ -76,7 +117,8 @@ export async function POST(request: Request) {
         whatsapp: payload.whatsapp.replace(/\D/g, ''),
         notes: payload.notes?.trim().slice(0, 1000) ?? '',
         status,
-        source: 'customer_web',
+        source: staffContext ? 'staff_phone' : 'customer_web',
+        createdBy: staffContext?.decodedToken.uid ?? null,
         confirmationTokenHash: createHash('sha256').update(token).digest('hex'),
         createdAt: FieldValue.serverTimestamp(),
         updatedAt: FieldValue.serverTimestamp(),
@@ -84,8 +126,8 @@ export async function POST(request: Request) {
 
       transaction.set(auditRef, {
         reservationId: reservationRef.id,
-        actorType: 'customer',
-        actorId: null,
+        actorType: staffContext ? 'staff' : 'customer',
+        actorId: staffContext?.decodedToken.uid ?? null,
         action: 'reservation_created',
         fromStatus: null,
         toStatus: status,
