@@ -72,12 +72,7 @@ export async function POST(request: Request) {
   const status = payload.partySize <= AUTO_APPROVAL_LIMIT ? 'confirmed' : 'pending_approval';
 
   if (!database) {
-    return NextResponse.json({
-      id: `demo-${Date.now()}`,
-      token,
-      status,
-      demo: true,
-    });
+    return NextResponse.json({ error: 'Firebase não configurado. A reserva não foi salva.' }, { status: 503 });
   }
 
   const serviceKey = `${payload.serviceDate}_${payload.service}`;
@@ -144,5 +139,5 @@ export async function POST(request: Request) {
     throw error;
   }
 
-  return NextResponse.json({ id: reservationRef.id, token, status, demo: false }, { status: 201 });
+  return NextResponse.json({ id: reservationRef.id, token, status }, { status: 201 });
 }
