@@ -3,12 +3,12 @@ import { NextResponse } from 'next/server';
 
 import { requireStaff } from '@/lib/auth/staff-request';
 import {
-  CAPACITY_PER_SERVICE,
   isMonday,
   isReservationInput,
-  isWithinBookingWindow,
+  reservationInstant,
   type ReservationStatus,
 } from '@/lib/domain/reservations';
+import { getOperationalSettings } from '@/lib/domain/operational-settings';
 import { getAdminDatabase } from '@/lib/firebase/admin';
 
 const allowedStatuses: ReservationStatus[] = [
@@ -41,12 +41,19 @@ export async function PATCH(request: Request, { params }: RouteContext<'/api/res
     ? payload.status as ReservationStatus
     : null;
   if (!status) return NextResponse.json({ error: 'Situação inválida.' }, { status: 400 });
-  if (!isWithinBookingWindow(payload)) {
-    return NextResponse.json({ error: 'A reserva pode ficar aberta com até 12 meses de antecedência.' }, { status: 400 });
-  }
-
   const database = getAdminDatabase();
   if (!database) return NextResponse.json({ error: 'Firebase não configurado.' }, { status: 503 });
+
+  const settings = await getOperationalSettings(database);
+  const latest = new Date();
+  latest.setMonth(latest.getMonth() + settings.maxBookingMonths);
+  if (reservationInstant(payload).getTime() > latest.getTime()) {
+    return NextResponse.json({ error: `A reserva pode ficar aberta com até ${settings.maxBookingMonths} meses de antecedência.` }, { status: 400 });
+  }
+  const arrivalLimit = payload.service === 'almoco' ? settings.lunchArrivalLimit : settings.dinnerArrivalLimit;
+  if (payload.arrivalTime > arrivalLimit) {
+    return NextResponse.json({ error: `O horário máximo de chegada é ${arrivalLimit}.` }, { status: 400 });
+  }
 
   const { id } = await params;
   const reservationRef = database.collection('reservations').doc(id);
@@ -84,7 +91,7 @@ export async function PATCH(request: Request, { params }: RouteContext<'/api/res
 
       if (movingService) {
         const currentNextHeldSeats = Number(nextCapacitySnapshot.data()?.heldSeats ?? 0);
-        if (currentNextHeldSeats + nextHeldSeats > CAPACITY_PER_SERVICE) throw new Error('CAPACITY_EXCEEDED');
+        if (currentNextHeldSeats + nextHeldSeats > settings.capacityPerService) throw new Error('CAPACITY_EXCEEDED');
 
         transaction.set(previousCapacityRef, {
           heldSeats: Math.max(0, Number(previousCapacitySnapshot.data()?.heldSeats ?? 0) - previousHeldSeats),
@@ -94,18 +101,18 @@ export async function PATCH(request: Request, { params }: RouteContext<'/api/res
         transaction.set(nextCapacityRef, {
           serviceDate: payload.serviceDate,
           service: payload.service,
-          limit: CAPACITY_PER_SERVICE,
+          limit: settings.capacityPerService,
           heldSeats: currentNextHeldSeats + nextHeldSeats,
           updatedAt: FieldValue.serverTimestamp(),
         }, { merge: true });
       } else {
         const currentHeldSeats = Number(previousCapacitySnapshot.data()?.heldSeats ?? 0);
         const adjustedHeldSeats = Math.max(0, currentHeldSeats - previousHeldSeats + nextHeldSeats);
-        if (adjustedHeldSeats > CAPACITY_PER_SERVICE) throw new Error('CAPACITY_EXCEEDED');
+        if (adjustedHeldSeats > settings.capacityPerService) throw new Error('CAPACITY_EXCEEDED');
         transaction.set(previousCapacityRef, {
           serviceDate: payload.serviceDate,
           service: payload.service,
-          limit: CAPACITY_PER_SERVICE,
+          limit: settings.capacityPerService,
           heldSeats: adjustedHeldSeats,
           updatedAt: FieldValue.serverTimestamp(),
         }, { merge: true });
@@ -159,7 +166,7 @@ export async function PATCH(request: Request, { params }: RouteContext<'/api/res
       return NextResponse.json({ error: 'O restaurante não recebe reservas nessa nova data.' }, { status: 409 });
     }
     if (error instanceof Error && error.message === 'CAPACITY_EXCEEDED') {
-      return NextResponse.json({ error: 'A alteração ultrapassa a cota de 70 lugares desse serviço.' }, { status: 409 });
+      return NextResponse.json({ error: `A alteração ultrapassa a cota de ${settings.capacityPerService} lugares desse serviço.` }, { status: 409 });
     }
     throw error;
   }

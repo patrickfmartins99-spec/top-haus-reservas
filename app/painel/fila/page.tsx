@@ -5,13 +5,14 @@ import { onAuthStateChanged, type User } from 'firebase/auth';
 import { Check, Clock3, LoaderCircle, MessageCircle, Pencil, PhoneCall, Plus, Save, UserRoundX, Users } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
+import { Button, buttonVariants } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
 import { getFirebaseClient } from '@/lib/firebase/client';
+import { buildWhatsAppUrl } from '@/lib/whatsapp';
 
 type QueueStatus = 'waiting' | 'called' | 'seated' | 'removed';
 type QueueEntry = {
@@ -142,7 +143,7 @@ export default function WaitlistPage() {
       const response = await staffRequest(currentUser, `/api/fila/${entry.id}`, { method: 'PATCH', body: JSON.stringify({ status }) });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? 'Não foi possível atualizar a fila.');
-      setSuccess(status === 'called' ? `${entry.customerName} foi marcado como chamado. A mensagem será enviada quando o WhatsApp estiver conectado.` : 'Fila atualizada com sucesso.');
+      setSuccess(status === 'called' ? `${entry.customerName} foi marcado como chamado. Use o botão WhatsApp para enviar a mensagem pronta.` : 'Fila atualizada com sucesso.');
       await loadQueue(currentUser);
     } catch (caughtError) {
       setError(caughtError instanceof Error ? caughtError.message : 'Não foi possível atualizar a fila.');
@@ -153,7 +154,7 @@ export default function WaitlistPage() {
     <div className="mx-auto max-w-6xl space-y-6 p-5 sm:p-8">
       <div className="flex flex-wrap items-end justify-between gap-4"><div><p className="text-xs font-bold uppercase tracking-[0.16em] text-haus-terracotta">Atendimento sem reserva</p><h1 className="mt-2 text-3xl font-extrabold tracking-[-0.03em]">Fila de espera</h1><p className="mt-1 text-sm text-black/65">Registre os dados do cliente e acompanhe a ordem de atendimento.</p></div><Button className="bg-black text-white hover:bg-black/85" onClick={openNewEntry}><Plus /> Adicionar à fila</Button></div>
 
-      <div className="rounded-xl border border-haus-gold/45 bg-[#f4e7d7] px-4 py-3 text-sm text-black/75"><strong>WhatsApp:</strong> o número já é obrigatório e fica salvo. O envio automático será ativado quando conectarmos o provedor de mensagens.</div>
+      <div className="rounded-xl border border-haus-gold/45 bg-[#f4e7d7] px-4 py-3 text-sm text-black/75"><strong>WhatsApp assistido:</strong> o sistema abre a conversa com a mensagem pronta; o colaborador confere e envia pelo WhatsApp Business.</div>
       {error ? <p className="rounded-xl bg-destructive/10 px-4 py-3 text-sm font-medium text-destructive" role="alert">{error}</p> : null}
       {success ? <output className="block rounded-xl bg-black px-4 py-3 text-sm font-medium text-white">{success}</output> : null}
 
@@ -166,7 +167,10 @@ export default function WaitlistPage() {
       <Card className="bg-white ring-black/7"><CardHeader className="border-b border-black/7"><CardTitle>Ordem de atendimento</CardTitle><p className="text-sm text-black/65">Dados salvos no Firebase e compartilhados com toda a equipe.</p></CardHeader><CardContent className="space-y-3">
         {loading ? <p className="flex items-center justify-center gap-2 py-10 text-sm text-black/65"><LoaderCircle className="size-4 animate-spin" /> Carregando fila...</p> : null}
         {!loading && activeQueue.length === 0 ? <p className="py-10 text-center text-sm text-black/65">Nenhum cliente aguardando no momento.</p> : null}
-        {activeQueue.map((entry, index) => <article key={entry.id} className={`flex flex-col gap-4 rounded-xl border p-4 sm:flex-row sm:items-center ${entry.status === 'called' ? 'border-haus-terracotta/35 bg-[#f4e7d7]' : 'border-black/8'}`}><span className="grid size-9 shrink-0 place-items-center rounded-full bg-black text-sm font-bold text-white">{index + 1}</span><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><p className="font-bold">{entry.customerName}</p><Badge className={entry.status === 'called' ? 'bg-haus-terracotta text-white' : 'bg-[#e7e1db] text-[#4f3528]'}>{statusLabel[entry.status]}</Badge></div><p className="mt-1 text-sm font-medium text-black/70">{entry.partySize} pessoas · {entry.estimatedMinutes} min · {formatPhone(entry.whatsapp)}</p></div><div className="flex flex-wrap gap-2"><Button disabled={saving} variant="outline" onClick={() => openEditEntry(entry)}><Pencil /> Editar</Button>{entry.status === 'waiting' ? <Button disabled={saving} onClick={() => updateStatus(entry, 'called')} className="bg-haus-terracotta text-white hover:bg-haus-terracotta/90"><PhoneCall /> Chamar</Button> : null}{entry.status === 'called' ? <Button disabled={saving} onClick={() => updateStatus(entry, 'seated')} className="bg-black text-white hover:bg-black/85"><Check /> Marcar atendido</Button> : null}<Button disabled={saving} variant="outline" onClick={() => updateStatus(entry, 'removed')}><UserRoundX /> Remover</Button></div></article>)}
+        {activeQueue.map((entry, index) => {
+          const whatsappUrl = buildWhatsAppUrl(entry.whatsapp, `Olá, ${entry.customerName}! Sua mesa no Top Haus está disponível. Por favor, dirija-se à recepção. A mesa será mantida por 10 minutos.`);
+          return <article key={entry.id} className={`flex flex-col gap-4 rounded-xl border p-4 sm:flex-row sm:items-center ${entry.status === 'called' ? 'border-haus-terracotta/35 bg-[#f4e7d7]' : 'border-black/8'}`}><span className="grid size-9 shrink-0 place-items-center rounded-full bg-black text-sm font-bold text-white">{index + 1}</span><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><p className="font-bold">{entry.customerName}</p><Badge className={entry.status === 'called' ? 'bg-haus-terracotta text-white' : 'bg-[#e7e1db] text-[#4f3528]'}>{statusLabel[entry.status]}</Badge></div><p className="mt-1 text-sm font-medium text-black/70">{entry.partySize} pessoas · {entry.estimatedMinutes} min · {formatPhone(entry.whatsapp)}</p></div><div className="flex flex-wrap gap-2"><Button disabled={saving} variant="outline" onClick={() => openEditEntry(entry)}><Pencil /> Editar</Button>{entry.status === 'waiting' ? <Button disabled={saving} onClick={() => updateStatus(entry, 'called')} className="bg-haus-terracotta text-white hover:bg-haus-terracotta/90"><PhoneCall /> Chamar</Button> : null}{entry.status === 'called' && whatsappUrl ? <a href={whatsappUrl} target="_blank" rel="noreferrer" className={buttonVariants({ variant: 'outline', className: 'border-haus-terracotta/30 text-haus-terracotta' })}><MessageCircle /> WhatsApp</a> : null}{entry.status === 'called' ? <Button disabled={saving} onClick={() => updateStatus(entry, 'seated')} className="bg-black text-white hover:bg-black/85"><Check /> Marcar atendido</Button> : null}<Button disabled={saving} variant="outline" onClick={() => updateStatus(entry, 'removed')}><UserRoundX /> Remover</Button></div></article>;
+        })}
       </CardContent></Card>
 
       <Dialog open={dialogOpen} onOpenChange={(open) => { setDialogOpen(open); if (!open) setEditingEntry(null); }}>

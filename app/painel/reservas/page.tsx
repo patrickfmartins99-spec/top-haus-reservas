@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { onAuthStateChanged, type User } from 'firebase/auth';
-import { CalendarDays, LoaderCircle, Pencil, Plus, Save, Search, Users } from 'lucide-react';
+import { CalendarDays, LoaderCircle, MessageCircle, Pencil, Plus, Save, Search, Users } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button, buttonVariants } from '@/components/ui/button';
@@ -16,6 +16,7 @@ import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Textarea } from '@/components/ui/textarea';
 import { getFirebaseClient } from '@/lib/firebase/client';
+import { buildWhatsAppUrl, reservationMessage } from '@/lib/whatsapp';
 
 type Reservation = {
   id: string;
@@ -82,7 +83,7 @@ export default function ReservationsPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
-  const [search, setSearch] = useState('');
+  const [search, setSearch] = useState(searchParams.get('busca') ?? '');
   const [dateFilter, setDateFilter] = useState('');
   const [serviceFilter, setServiceFilter] = useState('todos');
   const [editingReservation, setEditingReservation] = useState<Reservation | null>(null);
@@ -182,7 +183,10 @@ export default function ReservationsPage() {
           {loading ? <p className="flex items-center justify-center gap-2 py-12 text-sm text-black/65"><LoaderCircle className="size-4 animate-spin" /> Carregando reservas...</p> : null}
           {!loading && filteredReservations.length === 0 ? <p className="py-12 text-center text-sm text-black/65">Nenhuma reserva encontrada.</p> : null}
           {!loading && filteredReservations.length > 0 ? <Table><TableHeader><TableRow><TableHead>Data</TableHead><TableHead>Horário</TableHead><TableHead>Cliente</TableHead><TableHead>Contato</TableHead><TableHead>Pessoas</TableHead><TableHead>Serviço</TableHead><TableHead>Situação</TableHead><TableHead>Ações</TableHead></TableRow></TableHeader><TableBody>
-            {filteredReservations.map((reservation) => <TableRow key={reservation.id} className={createdId === reservation.id ? 'bg-[#f4e7d7]' : undefined}><TableCell className="font-semibold">{formatDate(reservation.serviceDate)}</TableCell><TableCell className="font-bold">{reservation.arrivalTime}</TableCell><TableCell><p className="font-semibold">{reservation.customerName}</p><p className="font-mono text-[11px] font-semibold text-black/65">{reservation.id}</p></TableCell><TableCell className="font-medium text-black/70">{formatPhone(reservation.whatsapp)}</TableCell><TableCell><span className="flex items-center gap-1"><Users className="size-4 text-haus-terracotta" /> {reservation.partySize}</span></TableCell><TableCell className="capitalize">{reservation.service === 'almoco' ? 'Almoço' : 'Rodízio'}</TableCell><TableCell><Badge className={statusClass(reservation.status)}>{statusLabels[reservation.status] ?? reservation.status}</Badge></TableCell><TableCell><Button type="button" variant="outline" size="sm" onClick={() => startEditing(reservation)}><Pencil /> Editar</Button></TableCell></TableRow>)}
+            {filteredReservations.map((reservation) => {
+              const whatsappUrl = buildWhatsAppUrl(reservation.whatsapp, reservationMessage(reservation));
+              return <TableRow key={reservation.id} className={createdId === reservation.id ? 'bg-[#f4e7d7]' : undefined}><TableCell className="font-semibold">{formatDate(reservation.serviceDate)}</TableCell><TableCell className="font-bold">{reservation.arrivalTime}</TableCell><TableCell><p className="font-semibold">{reservation.customerName}</p><p className="font-mono text-[11px] font-semibold text-black/65">{reservation.id}</p></TableCell><TableCell className="font-medium text-black/70">{formatPhone(reservation.whatsapp)}</TableCell><TableCell><span className="flex items-center gap-1"><Users className="size-4 text-haus-terracotta" /> {reservation.partySize}</span></TableCell><TableCell className="capitalize">{reservation.service === 'almoco' ? 'Almoço' : 'Rodízio'}</TableCell><TableCell><Badge className={statusClass(reservation.status)}>{statusLabels[reservation.status] ?? reservation.status}</Badge></TableCell><TableCell><div className="flex gap-2"><Button type="button" variant="outline" size="sm" onClick={() => startEditing(reservation)}><Pencil /> Editar</Button>{whatsappUrl ? <a href={whatsappUrl} target="_blank" rel="noreferrer" className={buttonVariants({ variant: 'outline', size: 'sm', className: 'text-haus-terracotta' })}><MessageCircle /> WhatsApp</a> : null}</div></TableCell></TableRow>;
+            })}
           </TableBody></Table> : null}
         </CardContent>
       </Card>

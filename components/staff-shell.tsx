@@ -19,7 +19,8 @@ import {
 } from 'lucide-react';
 
 import { BrandLogo } from '@/components/brand-logo';
-import { Button } from '@/components/ui/button';
+import { buttonVariants } from '@/components/ui/button';
+import { Popover, PopoverContent, PopoverHeader, PopoverTitle, PopoverTrigger } from '@/components/ui/popover';
 import { getFirebaseClient } from '@/lib/firebase/client';
 
 const navigation = [
@@ -42,6 +43,7 @@ export function StaffShell({ children }: { children: ReactNode }) {
   const [checkingSession, setCheckingSession] = useState(true);
   const [displayName, setDisplayName] = useState('Colaborador');
   const [loggingOut, setLoggingOut] = useState(false);
+  const [notifications, setNotifications] = useState<Array<{ id: string; title: string; description: string; href: string }>>([]);
 
   useEffect(() => {
     const firebase = getFirebaseClient();
@@ -59,6 +61,27 @@ export function StaffShell({ children }: { children: ReactNode }) {
       setCheckingSession(false);
     });
   }, [router]);
+
+  async function loadNotifications() {
+    const firebase = getFirebaseClient();
+    const user = firebase?.auth.currentUser;
+    if (!user) return;
+    try {
+      const token = await user.getIdToken();
+      const response = await fetch('/api/notificacoes', { headers: { Authorization: `Bearer ${token}` } });
+      const data = await response.json();
+      if (response.ok) setNotifications(data.items);
+    } catch {
+      // A central continua utilizável mesmo se a atualização silenciosa falhar.
+    }
+  }
+
+  useEffect(() => {
+    if (checkingSession) return;
+    const initial = window.setTimeout(() => { void loadNotifications(); }, 0);
+    const interval = window.setInterval(() => { void loadNotifications(); }, 60000);
+    return () => { window.clearTimeout(initial); window.clearInterval(interval); };
+  }, [checkingSession, pathname]);
 
   async function handleLogout() {
     const firebase = getFirebaseClient();
@@ -112,7 +135,19 @@ export function StaffShell({ children }: { children: ReactNode }) {
           <header className="flex h-20 items-center justify-between border-b border-black/7 bg-white px-5 sm:px-8">
             <div><p className="text-xs font-medium text-haus-ink/45">Painel da equipe</p><p className="font-heading text-xl font-bold">Top Haus Reservas</p></div>
             <div className="flex items-center gap-2">
-              <Button variant="outline" size="icon" aria-label="Notificações"><Bell className="size-4" /></Button>
+              <Popover>
+                <PopoverTrigger onClick={() => void loadNotifications()} className={`${buttonVariants({ variant: 'outline', size: 'icon' })} relative`} aria-label={`Notificações: ${notifications.length}`}>
+                  <Bell className="size-4" />
+                  {notifications.length ? <span className="absolute -right-1 -top-1 grid min-h-4 min-w-4 place-items-center rounded-full bg-haus-terracotta px-1 text-[9px] font-bold text-white">{notifications.length > 9 ? '9+' : notifications.length}</span> : null}
+                </PopoverTrigger>
+                <PopoverContent align="end" className="w-[min(22rem,calc(100vw-2rem))] p-0">
+                  <PopoverHeader className="border-b border-black/8 p-4"><PopoverTitle className="font-bold">Notificações</PopoverTitle><p className="text-xs text-black/60">Pendências que precisam da atenção da equipe.</p></PopoverHeader>
+                  <div className="max-h-80 overflow-y-auto p-2">
+                    {!notifications.length ? <p className="py-8 text-center text-xs text-black/60">Tudo em dia por aqui.</p> : null}
+                    {notifications.map((item) => <Link key={item.id} href={item.href} className="block rounded-lg p-3 transition hover:bg-black/5"><p className="text-sm font-bold">{item.title}</p><p className="mt-1 text-xs leading-5 text-black/65">{item.description}</p></Link>)}
+                  </div>
+                </PopoverContent>
+              </Popover>
               <div className="hidden items-center gap-2 rounded-lg border border-black/8 px-3 py-2 text-sm sm:flex"><span className="grid size-7 place-items-center rounded-full bg-haus-terracotta text-xs font-bold text-white">{initials}</span><span className="max-w-36 truncate">{displayName}</span><ChevronDown className="size-3 text-black/40" /></div>
             </div>
           </header>

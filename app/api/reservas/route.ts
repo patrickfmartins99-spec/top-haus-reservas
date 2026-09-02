@@ -4,14 +4,12 @@ import { FieldValue } from 'firebase-admin/firestore';
 import { NextResponse } from 'next/server';
 
 import {
-  AUTO_APPROVAL_LIMIT,
-  CAPACITY_PER_SERVICE,
-  isAtLeastTwentyFourHoursAhead,
   isMonday,
   isReservationInput,
-  isWithinBookingWindow,
+  reservationInstant,
 } from '@/lib/domain/reservations';
 import { requireStaff } from '@/lib/auth/staff-request';
+import { getOperationalSettings } from '@/lib/domain/operational-settings';
 import { getAdminDatabase } from '@/lib/firebase/admin';
 
 function serializeTimestamp(value: unknown) {
@@ -56,24 +54,32 @@ export async function POST(request: Request) {
   if (!isReservationInput(payload)) {
     return NextResponse.json({ error: 'Dados da reserva inválidos.' }, { status: 400 });
   }
-  if (!isAtLeastTwentyFourHoursAhead(payload)) {
-    return NextResponse.json({ error: 'A reserva precisa ser feita com 24 horas de antecedência.' }, { status: 400 });
-  }
-  if (!isWithinBookingWindow(payload)) {
-    return NextResponse.json({ error: 'A reserva pode ser feita com até 12 meses de antecedência.' }, { status: 400 });
-  }
-
   const database = getAdminDatabase();
   const staffContext = request.headers.get('authorization') ? await requireStaff(request) : null;
   if (request.headers.get('authorization') && !staffContext) {
     return NextResponse.json({ error: 'Sua sessão expirou. Entre novamente.' }, { status: 403 });
   }
-  const token = randomBytes(24).toString('hex');
-  const status = payload.partySize <= AUTO_APPROVAL_LIMIT ? 'confirmed' : 'pending_approval';
-
   if (!database) {
     return NextResponse.json({ error: 'Firebase não configurado. A reserva não foi salva.' }, { status: 503 });
   }
+
+  const settings = await getOperationalSettings(database);
+  const instant = reservationInstant(payload);
+  if (instant.getTime() - Date.now() < settings.minAdvanceHours * 60 * 60 * 1000) {
+    return NextResponse.json({ error: `A reserva precisa ser feita com ${settings.minAdvanceHours} horas de antecedência.` }, { status: 400 });
+  }
+  const latest = new Date();
+  latest.setMonth(latest.getMonth() + settings.maxBookingMonths);
+  if (instant.getTime() > latest.getTime()) {
+    return NextResponse.json({ error: `A reserva pode ser feita com até ${settings.maxBookingMonths} meses de antecedência.` }, { status: 400 });
+  }
+  const arrivalLimit = payload.service === 'almoco' ? settings.lunchArrivalLimit : settings.dinnerArrivalLimit;
+  if (payload.arrivalTime > arrivalLimit) {
+    return NextResponse.json({ error: `O horário máximo de chegada é ${arrivalLimit}.` }, { status: 400 });
+  }
+
+  const token = randomBytes(24).toString('hex');
+  const status = payload.partySize <= settings.autoApprovalLimit ? 'confirmed' : 'pending_approval';
 
   const serviceKey = `${payload.serviceDate}_${payload.service}`;
   const capacityRef = database.collection('serviceCapacity').doc(serviceKey);
@@ -94,14 +100,14 @@ export async function POST(request: Request) {
       }
 
       const heldSeats = Number(capacitySnapshot.data()?.heldSeats ?? 0);
-      if (heldSeats + payload.partySize > CAPACITY_PER_SERVICE) {
+      if (heldSeats + payload.partySize > settings.capacityPerService) {
         throw new Error('CAPACITY_EXCEEDED');
       }
 
       transaction.set(capacityRef, {
         serviceDate: payload.serviceDate,
         service: payload.service,
-        limit: CAPACITY_PER_SERVICE,
+        limit: settings.capacityPerService,
         heldSeats: heldSeats + payload.partySize,
         updatedAt: FieldValue.serverTimestamp(),
       }, { merge: true });

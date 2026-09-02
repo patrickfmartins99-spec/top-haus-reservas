@@ -24,11 +24,15 @@ type AuditEvent = {
 const actionLabels: Record<string, string> = {
   reservation_created: 'Criou uma reserva',
   reservation_updated: 'Alterou uma reserva',
+  reservation_updated_by_customer: 'Alterou a própria reserva',
+  reservation_presence_confirmed: 'Confirmou presença',
+  reservation_cancelled: 'Cancelou uma reserva',
   waitlist_created: 'Adicionou cliente à fila',
   waitlist_updated: 'Alterou cliente da fila',
   waitlist_status_changed: 'Alterou situação da fila',
   staff_created: 'Criou um colaborador',
   staff_updated: 'Alterou um colaborador',
+  settings_updated: 'Alterou as configurações',
 };
 
 const statusLabels: Record<string, string> = {

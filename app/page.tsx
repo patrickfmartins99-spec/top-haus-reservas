@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import {
   CalendarDays,
@@ -30,6 +30,7 @@ import { Label } from '@/components/ui/label';
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
+import { DEFAULT_OPERATIONAL_SETTINGS, type OperationalSettings } from '@/lib/domain/operational-settings';
 
 type Service = 'almoco' | 'rodizio';
 
@@ -69,16 +70,23 @@ export default function Home() {
   const [seatingPreference, setSeatingPreference] = useState('sem_preferencia');
   const [notes, setNotes] = useState('');
   const [submitting, setSubmitting] = useState(false);
-  const [result, setResult] = useState<{ id: string; status: string; demo?: boolean } | null>(null);
+  const [result, setResult] = useState<{ id: string; status: string } | null>(null);
   const [error, setError] = useState('');
+  const [settings, setSettings] = useState<OperationalSettings>(DEFAULT_OPERATIONAL_SETTINGS);
+
+  useEffect(() => {
+    fetch('/api/configuracoes/publicas').then(async (response) => {
+      if (response.ok) setSettings((await response.json()).settings);
+    }).catch(() => undefined);
+  }, []);
 
   const { minDate, maxDate } = useMemo(() => {
     const minimum = new Date();
-    minimum.setDate(minimum.getDate() + 1);
+    minimum.setHours(minimum.getHours() + settings.minAdvanceHours);
     const maximum = new Date();
-    maximum.setFullYear(maximum.getFullYear() + 1);
+    maximum.setMonth(maximum.getMonth() + settings.maxBookingMonths);
     return { minDate: toDateInput(minimum), maxDate: toDateInput(maximum) };
-  }, []);
+  }, [settings.maxBookingMonths, settings.minAdvanceHours]);
 
   const mondaySelected = useMemo(() => {
     if (!date) return false;
@@ -166,7 +174,7 @@ export default function Home() {
               Escolha o almoço ou o rodízio, informe o tamanho do grupo e encontre o melhor horário para sua visita.
             </p>
             <div className="mt-8 flex flex-wrap gap-x-6 gap-y-3 text-sm text-white/90">
-              <span className="flex items-center gap-2"><Check className="size-4 text-haus-gold" /> Confirmação pelo WhatsApp</span>
+              <span className="flex items-center gap-2"><Check className="size-4 text-haus-gold" /> Consulta e alterações pelo site</span>
               <span className="flex items-center gap-2"><Check className="size-4 text-haus-gold" /> Sem necessidade de cadastro</span>
             </div>
           </div>
@@ -194,18 +202,11 @@ export default function Home() {
                   </h2>
                   <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-haus-ink/60">
                     {result.status === 'confirmed'
-                      ? 'Você receberá os detalhes e o link de confirmação pelo WhatsApp.'
-                      : 'A equipe do Top Haus analisará o seu grupo e enviará a resposta pelo WhatsApp.'}
+                      ? 'Guarde o código abaixo. Com ele e seu WhatsApp, você pode consultar ou alterar a reserva.'
+                      : 'A equipe do Top Haus analisará o grupo. Guarde o código para acompanhar a solicitação.'}
                   </p>
-                  {result.demo && (
-                    <p className="mx-auto mt-4 max-w-md rounded-lg bg-haus-gold/15 px-4 py-3 text-xs font-medium text-haus-ink/70">
-                      Modo de demonstração: a experiência foi concluída, mas os dados ainda não foram gravados porque o Firebase não está conectado.
-                    </p>
-                  )}
-                  <p className="mt-5 text-xs uppercase tracking-[0.16em] text-haus-ink/45">Código {result.id}</p>
-                  <Button type="button" variant="outline" className="mt-6" onClick={() => { setResult(null); setChecked(false); }}>
-                    Fazer outra reserva
-                  </Button>
+                  <p className="mt-5 break-all rounded-xl bg-black px-4 py-3 font-mono text-sm font-bold text-white">Código {result.id}</p>
+                  <div className="mt-6 flex flex-wrap justify-center gap-3"><Link href={`/minha-reserva?codigo=${encodeURIComponent(result.id)}`} className="inline-flex h-8 items-center justify-center rounded-lg border border-black/15 px-3 text-sm font-semibold hover:bg-black/5">Consultar esta reserva</Link><Button type="button" variant="outline" onClick={() => { setResult(null); setChecked(false); }}>Fazer outra reserva</Button></div>
                 </output>
               ) : (
               <form onSubmit={checkAvailability} className="space-y-6">
@@ -275,7 +276,7 @@ export default function Home() {
                       </button>
                     ))}
                   </div>
-                  <p className="mt-2 text-xs text-haus-ink/50">Reservas para {services[service].label.toLowerCase()} são aceitas até {services[service].cutoff}. Há 10 minutos de tolerância.</p>
+                  <p className="mt-2 text-xs text-haus-ink/60">Reservas para {services[service].label.toLowerCase()} são aceitas até {service === 'almoco' ? settings.lunchArrivalLimit : settings.dinnerArrivalLimit}. Há {settings.lateToleranceMinutes} minutos de tolerância.</p>
                 </fieldset>
 
                 {checked && (
@@ -283,7 +284,7 @@ export default function Home() {
                     <output className="block rounded-xl border border-haus-sage/25 bg-haus-sage/[0.07] p-4">
                       <p className="flex items-center gap-2 font-semibold text-haus-sage"><ShieldCheck className="size-5" /> Horário disponível</p>
                       <p className="mt-1 text-sm text-haus-ink/60">
-                        {partySize <= 20
+                        {partySize <= settings.autoApprovalLimit
                           ? 'Preencha seus dados para confirmar a reserva automaticamente.'
                           : 'Preencha seus dados para enviar o grupo à aprovação da equipe.'}
                       </p>
@@ -320,7 +321,7 @@ export default function Home() {
 
                 <Button type="submit" size="lg" disabled={!date || submitting} className="h-12 w-full rounded-xl bg-haus-terracotta text-base font-bold text-white hover:bg-haus-terracotta/90">
                   {submitting && <LoaderCircle className="size-5 animate-spin" />}
-                  {checked ? (partySize <= 20 ? 'Confirmar reserva' : 'Enviar para aprovação') : 'Ver disponibilidade'}
+                  {checked ? (partySize <= settings.autoApprovalLimit ? 'Confirmar reserva' : 'Enviar para aprovação') : 'Ver disponibilidade'}
                   {!submitting && <ChevronRight className="size-5" />}
                 </Button>
               </form>
@@ -334,8 +335,8 @@ export default function Home() {
         <div className="mx-auto grid max-w-7xl gap-5 sm:grid-cols-3">
           {[
             { icon: Clock3, title: 'Chegue no horário', text: 'Sua mesa fica reservada por 10 minutos após o horário escolhido.' },
-            { icon: MessageCircle, title: 'Acompanhe pelo WhatsApp', text: 'Confirmações, lembretes e alterações chegam diretamente no seu telefone.' },
-            { icon: CalendarDays, title: 'Planeje com antecedência', text: 'Reserve com no mínimo 24 horas e até 12 meses de antecedência.' },
+            { icon: MessageCircle, title: 'Atendimento pelo WhatsApp', text: 'Quando necessário, fale com a equipe usando a conversa preparada pelo sistema.' },
+            { icon: CalendarDays, title: 'Planeje com antecedência', text: `Reserve com no mínimo ${settings.minAdvanceHours} horas e até ${settings.maxBookingMonths} meses de antecedência.` },
           ].map(({ icon: Icon, title, text }) => (
             <article key={title} className="flex gap-4 rounded-2xl border border-black/7 bg-white/60 p-5">
               <span className="grid size-10 shrink-0 place-items-center rounded-full bg-haus-terracotta/10 text-haus-terracotta"><Icon className="size-5" /></span>
