@@ -10,10 +10,10 @@ const { buildMessage, normalizeBrazilianPhone, positiveNumber } = require('./mes
 
 const ROBOT_VERSION = '1.0.0';
 const ROBOT_ID = `${os.hostname()}-${process.pid}`;
-const PROCESS_EXISTING_PENDING = process.env.PROCESS_EXISTING_PENDING === 'true';
 const SEND_DELAY_MIN_MS = positiveNumber(process.env.SEND_DELAY_MIN_MS, 5000);
 const SEND_DELAY_MAX_MS = Math.max(SEND_DELAY_MIN_MS, positiveNumber(process.env.SEND_DELAY_MAX_MS, 10000));
-const robotStartedAt = Date.now();
+const POLL_INTERVAL_MS = positiveNumber(process.env.POLL_INTERVAL_MS, 2000);
+const MAX_PENDING_AGE_HOURS = positiveNumber(process.env.MAX_PENDING_AGE_HOURS, 24);
 
 function loadServiceAccount() {
   const configuredPath = process.env.FIREBASE_SERVICE_ACCOUNT_PATH;
@@ -40,10 +40,12 @@ try {
 }
 
 const db = admin.firestore();
+db.settings({ preferRest: true });
 const queue = [];
 const queuedIds = new Set();
 let processing = false;
-let unsubscribeFromQueue = null;
+let pollingTimer = null;
+let polling = false;
 
 const client = new Client({
   authStrategy: new LocalAuth({
@@ -67,7 +69,7 @@ client.on('authenticated', () => {
 
 client.on('ready', () => {
   console.log('✅ Robô de reservas conectado e pronto');
-  subscribeToWhatsAppQueue();
+  startQueuePolling();
 });
 
 client.on('loading_screen', (percent, message) => {
@@ -80,9 +82,9 @@ client.on('auth_failure', (message) => {
 
 client.on('disconnected', (reason) => {
   console.error('❌ WhatsApp desconectado:', reason);
-  if (unsubscribeFromQueue) {
-    unsubscribeFromQueue();
-    unsubscribeFromQueue = null;
+  if (pollingTimer) {
+    clearInterval(pollingTimer);
+    pollingTimer = null;
   }
 });
 
@@ -93,41 +95,48 @@ function timestampMilliseconds(value) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function subscribeToWhatsAppQueue() {
-  if (unsubscribeFromQueue) return;
+function startQueuePolling() {
+  if (pollingTimer) return;
+  console.log(`👀 Consultando novas mensagens a cada ${POLL_INTERVAL_MS / 1000} segundo(s)`);
+  pollQueue();
+  pollingTimer = setInterval(pollQueue, POLL_INTERVAL_MS);
+}
 
-  let firstSnapshot = true;
-  unsubscribeFromQueue = db.collection('whatsappQueue')
-    .where('status', '==', 'pending')
-    .onSnapshot((snapshot) => {
-      let skippedExisting = 0;
+async function pollQueue() {
+  if (polling) return;
+  polling = true;
 
-      for (const change of snapshot.docChanges()) {
-        if (change.type !== 'added' && change.type !== 'modified') continue;
+  try {
+    const snapshot = await db.collection('whatsappQueue')
+      .where('status', '==', 'pending')
+      .limit(100)
+      .get();
 
-        const data = change.doc.data();
-        const createdAt = timestampMilliseconds(data.createdAt);
-        const isPreviousEvent = firstSnapshot && createdAt < robotStartedAt;
+    for (const document of snapshot.docs) {
+      const data = document.data();
+      const createdAt = timestampMilliseconds(data.createdAt);
+      const ageHours = createdAt > 0 ? (Date.now() - createdAt) / 3600000 : 0;
 
-        if (isPreviousEvent && !PROCESS_EXISTING_PENDING) {
-          skippedExisting += 1;
-          continue;
-        }
-
-        enqueueEvent(change.doc.id, data, createdAt);
+      if (ageHours > MAX_PENDING_AGE_HOURS) {
+        await document.ref.update({
+          status: 'ignored',
+          ignoredReason: `Mensagem pendente há mais de ${MAX_PENDING_AGE_HOURS} hora(s).`,
+          processedAt: admin.firestore.FieldValue.serverTimestamp(),
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+        console.log(`ℹ️ Evento antigo ${document.id} marcado como ignorado.`);
+        continue;
       }
 
-      if (firstSnapshot && skippedExisting > 0) {
-        console.log(`ℹ️ ${skippedExisting} evento(s) antigo(s) foram ignorados nesta inicialização.`);
-      }
+      enqueueEvent(document.id, data, createdAt);
+    }
 
-      firstSnapshot = false;
-      processQueue();
-    }, (error) => {
-      console.error('❌ Erro ao acompanhar a fila do Firestore:', error.message);
-    });
-
-  console.log('👀 Acompanhando novas mensagens no Firestore em tempo real');
+    processQueue();
+  } catch (error) {
+    console.error('❌ Erro ao consultar o Firestore. Nova tentativa será feita automaticamente:', error.message);
+  } finally {
+    polling = false;
+  }
 }
 
 function enqueueEvent(id, data, createdAt) {
@@ -164,7 +173,6 @@ async function processQueue() {
   processing = true;
 
   const queuedEvent = queue.shift();
-  queuedIds.delete(queuedEvent.id);
   let claimed = null;
 
   try {
@@ -212,6 +220,7 @@ async function processQueue() {
       });
     }
   } finally {
+    queuedIds.delete(queuedEvent.id);
     processing = false;
     if (queue.length > 0) {
       const delay = randomDelay();
@@ -227,7 +236,7 @@ function randomDelay() {
 
 async function shutdown(signal) {
   console.log(`\n🛑 Encerrando o robô (${signal})...`);
-  if (unsubscribeFromQueue) unsubscribeFromQueue();
+  if (pollingTimer) clearInterval(pollingTimer);
   await client.destroy().catch(() => undefined);
   process.exit(0);
 }

@@ -14,8 +14,10 @@ async function main() {
   const app = initializeApp({ credential: cert(serviceAccount) }, `firebase-test-${Date.now()}`);
 
   try {
-    await getFirestore(app).collection('whatsappQueue').limit(1).get();
-    console.log('✅ Firestore acessível com a conta de serviço configurada.');
+    const database = getFirestore(app);
+    database.settings({ preferRest: true });
+    await database.collection('whatsappQueue').where('status', '==', 'pending').limit(1).get();
+    console.log('✅ Consulta REST ao Firestore concluída com a conta de serviço configurada.');
   } finally {
     await deleteApp(app);
   }

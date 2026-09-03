@@ -14,11 +14,9 @@ Este programa fica aberto no computador do restaurante e acompanha a coleção `
 
 Depois da autenticação, a sessão fica salva somente nesse computador. Nas próximas inicializações, normalmente não será necessário escanear novamente.
 
-## Segurança no primeiro uso
+## Recuperação de mensagens
 
-Por padrão, `PROCESS_EXISTING_PENDING=false`. Assim, o robô não envia mensagens antigas que já estavam pendentes antes de ele ser iniciado. Somente ações novas passam a ser processadas.
-
-Não altere essa opção para `true` sem revisar antes a coleção `whatsappQueue`, pois isso autoriza o envio do histórico pendente.
+O robô consulta o Firestore por REST a cada 2 segundos, evitando depender de conexões contínuas que algumas redes bloqueiam. Por padrão, ele recupera mensagens pendentes criadas nas últimas 24 horas. Pendências mais antigas são marcadas como `ignored`, evitando o envio tardio de testes antigos.
 
 ## Situações processadas
 
