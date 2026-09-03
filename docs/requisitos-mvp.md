@@ -28,14 +28,13 @@ Aplicação web responsiva para reservas de almoço e rodízio, painel dos colab
 - A cota é de 70 pessoas reservadas por serviço. Solicitações pendentes também ocupam temporariamente essa cota.
 - Não há sinal ou pagamento antecipado.
 
-## Mesas e preferências
+## Mesas
 
 - 44 mesas informadas: 37 mesas de quatro lugares e 7 mesas de dois lugares.
 - Essa distribuição soma 162 lugares físicos; o total mencionado de 164 precisa ser conferido antes do cadastro definitivo.
 - Mesas podem ser combinadas; um agrupamento automático atende até 20 pessoas.
-- Preferências: sofá, parede de vidro, parede com tomada ou sem preferência.
 - Sofás têm quatro lugares e não podem ser combinados.
-- Preferência de lugar não representa garantia; a atribuição final pertence à equipe.
+- O cliente não escolhe nem registra preferência de lugar. A atribuição final pertence à equipe.
 
 ## Mensagens
 
@@ -52,4 +51,8 @@ Toda criação, alteração, aprovação, cancelamento e mudança de situação 
 
 ## Fila de espera
 
-Registra nome, WhatsApp, quantidade de pessoas, horário de entrada, preferência, estimativa, posição e situação. A ordem base é de chegada, permitindo acomodar um grupo menor quando surgir capacidade compatível sem remover os demais.
+Registra nome, WhatsApp, quantidade de pessoas, horário de entrada, posição e situação. O tempo decorrido é calculado automaticamente e atualizado a cada segundo; ao chamar o cliente, o tempo de espera é congelado. A ordem base é de chegada, permitindo acomodar um grupo menor quando surgir capacidade compatível sem remover os demais.
+
+## Automação de WhatsApp
+
+Criações e mudanças relevantes geram eventos na coleção `whatsappQueue`. O robô local acompanha os eventos com situação `pending`, escolhe a mensagem pelo `eventType`, envia pelo WhatsApp e registra o resultado como `sent` ou `failed`, incluindo data de processamento e eventual erro.

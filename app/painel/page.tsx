@@ -9,6 +9,7 @@ import { Badge } from '@/components/ui/badge';
 import { buttonVariants } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { formatDurationClock, waitDurationMilliseconds } from '@/lib/domain/waitlist-time';
 import { getFirebaseClient } from '@/lib/firebase/client';
 
 type Reservation = {
@@ -18,7 +19,6 @@ type Reservation = {
   service: string;
   serviceDate: string;
   arrivalTime: string;
-  seatingPreference: string;
   status: string;
 };
 
@@ -26,8 +26,9 @@ type QueueEntry = {
   id: string;
   customerName: string;
   partySize: number;
-  estimatedMinutes: number;
   status: string;
+  enteredAt: string | null;
+  calledAt: string | null;
 };
 
 const statusLabels: Record<string, string> = {
@@ -35,13 +36,6 @@ const statusLabels: Record<string, string> = {
   confirmed: 'Confirmada',
   presence_confirmed: 'Presença confirmada',
   seated: 'Cliente chegou',
-};
-
-const preferenceLabels: Record<string, string> = {
-  sem_preferencia: 'Sem preferência',
-  sofa: 'Sofá lateral',
-  parede_vidro: 'Parede de vidro',
-  parede_tomada: 'Parede com tomada',
 };
 
 function statusClass(status: string) {
@@ -59,6 +53,7 @@ export default function DashboardPage() {
   const [queue, setQueue] = useState<QueueEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
     const firebase = getFirebaseClient();
@@ -87,6 +82,11 @@ export default function DashboardPage() {
         setLoading(false);
       }
     });
+  }, []);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
   }, []);
 
   const todayReservations = useMemo(() => reservations
@@ -124,8 +124,8 @@ export default function DashboardPage() {
           <CardContent>
             {loading ? <p className="flex items-center justify-center gap-2 py-12 text-sm text-black/65"><LoaderCircle className="size-4 animate-spin" /> Carregando dados...</p> : null}
             {!loading && todayReservations.length === 0 ? <p className="py-12 text-center text-sm text-black/65">Nenhuma reserva registrada para hoje.</p> : null}
-            {!loading && todayReservations.length > 0 ? <Table><TableHeader><TableRow><TableHead>Serviço</TableHead><TableHead>Horário</TableHead><TableHead>Cliente</TableHead><TableHead>Pessoas</TableHead><TableHead>Preferência</TableHead><TableHead>Situação</TableHead></TableRow></TableHeader><TableBody>
-              {todayReservations.map((reservation) => <TableRow key={reservation.id}><TableCell>{reservation.service === 'almoco' ? 'Almoço' : 'Rodízio'}</TableCell><TableCell className="font-semibold">{reservation.arrivalTime}</TableCell><TableCell><p className="font-semibold">{reservation.customerName}</p><p className="font-mono text-[11px] font-semibold text-black/65">{reservation.id}</p></TableCell><TableCell>{reservation.partySize}</TableCell><TableCell className="font-medium text-haus-ink/70">{preferenceLabels[reservation.seatingPreference] ?? reservation.seatingPreference}</TableCell><TableCell><Badge className={statusClass(reservation.status)}>{statusLabels[reservation.status] ?? reservation.status}</Badge></TableCell></TableRow>)}
+            {!loading && todayReservations.length > 0 ? <Table><TableHeader><TableRow><TableHead>Serviço</TableHead><TableHead>Horário</TableHead><TableHead>Cliente</TableHead><TableHead>Pessoas</TableHead><TableHead>Situação</TableHead></TableRow></TableHeader><TableBody>
+              {todayReservations.map((reservation) => <TableRow key={reservation.id}><TableCell>{reservation.service === 'almoco' ? 'Almoço' : 'Rodízio'}</TableCell><TableCell className="font-semibold">{reservation.arrivalTime}</TableCell><TableCell><p className="font-semibold">{reservation.customerName}</p><p className="font-mono text-[11px] font-semibold text-black/65">{reservation.id}</p></TableCell><TableCell>{reservation.partySize}</TableCell><TableCell><Badge className={statusClass(reservation.status)}>{statusLabels[reservation.status] ?? reservation.status}</Badge></TableCell></TableRow>)}
             </TableBody></Table> : null}
             <Link href="/painel/reservas" className={buttonVariants({ variant: 'outline', className: 'mt-5 w-full' })}><CalendarDays /> Ver todas as reservas</Link>
           </CardContent>
@@ -135,7 +135,7 @@ export default function DashboardPage() {
           <CardHeader className="flex-row items-center justify-between border-b border-black/6"><div><CardTitle className="font-heading text-xl font-bold">Fila de espera</CardTitle><p className="mt-1 text-xs font-medium text-haus-ink/65">Ordem atual de atendimento</p></div><Badge className="bg-haus-terracotta text-white">{activeQueue.length}</Badge></CardHeader>
           <CardContent className="space-y-3">
             {!loading && activeQueue.length === 0 ? <p className="py-8 text-center text-sm text-black/65">Nenhum cliente aguardando.</p> : null}
-            {activeQueue.map((entry, index) => <article key={entry.id} className="flex items-center gap-3 rounded-xl border border-black/7 p-3"><span className="grid size-8 shrink-0 place-items-center rounded-full bg-black text-xs font-bold text-white">{index + 1}</span><div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold">{entry.customerName}</p><p className="text-xs font-medium text-haus-ink/65">{entry.partySize} pessoas · estimativa de {entry.estimatedMinutes} min</p></div></article>)}
+            {activeQueue.map((entry, index) => <article key={entry.id} className="flex items-center gap-3 rounded-xl border border-black/7 p-3"><span className="grid size-8 shrink-0 place-items-center rounded-full bg-black text-xs font-bold text-white">{index + 1}</span><div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold">{entry.customerName}</p><p className="text-xs font-medium text-haus-ink/65">{entry.partySize} pessoas · {entry.status === 'called' ? 'aguardou' : 'aguardando há'} <span className="font-mono font-bold text-haus-ink">{formatDurationClock(waitDurationMilliseconds(entry, now))}</span></p></div></article>)}
             <Link href="/painel/fila" className={buttonVariants({ variant: 'ghost', className: 'w-full text-haus-terracotta hover:text-haus-terracotta' })}>Ver fila completa</Link>
           </CardContent>
         </Card>

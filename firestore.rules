@@ -24,6 +24,11 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // A fila é consumida somente pelo robô local usando uma conta de serviço.
+    match /whatsappQueue/{eventId} {
+      allow read, write: if false;
+    }
+
     match /serviceCapacity/{serviceId} {
       allow read: if isStaff();
       allow write: if false;

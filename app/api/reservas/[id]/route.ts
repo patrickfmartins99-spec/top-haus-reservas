@@ -10,6 +10,7 @@ import {
 } from '@/lib/domain/reservations';
 import { getOperationalSettings } from '@/lib/domain/operational-settings';
 import { getAdminDatabase } from '@/lib/firebase/admin';
+import { createWhatsAppOutboxEvent, type WhatsAppEventType } from '@/lib/firebase/whatsapp-outbox';
 
 const allowedStatuses: ReservationStatus[] = [
   'pending_approval',
@@ -125,7 +126,6 @@ export async function PATCH(request: Request, { params }: RouteContext<'/api/res
         service: payload.service,
         serviceDate: payload.serviceDate,
         arrivalTime: payload.arrivalTime,
-        seatingPreference: payload.seatingPreference,
         notes: payload.notes?.trim().slice(0, 1000) ?? '',
         status,
       };
@@ -150,13 +150,35 @@ export async function PATCH(request: Request, { params }: RouteContext<'/api/res
             service: String(previous.service ?? ''),
             serviceDate: String(previous.serviceDate ?? ''),
             arrivalTime: String(previous.arrivalTime ?? ''),
-            seatingPreference: String(previous.seatingPreference ?? ''),
             notes: String(previous.notes ?? ''),
           },
           after: updatedReservation,
         },
         createdAt: FieldValue.serverTimestamp(),
       });
+      const eventType: WhatsAppEventType = status === 'confirmed' && previousStatus === 'pending_approval'
+        ? 'reservation_approved'
+        : status === 'cancelled'
+          ? 'reservation_cancelled'
+          : status === 'no_show'
+            ? 'reservation_no_show'
+            : 'reservation_updated';
+      transaction.set(database.collection('whatsappQueue').doc(), createWhatsAppOutboxEvent({
+        eventType,
+        entityType: 'reservation',
+        entityId: id,
+        whatsapp: updatedReservation.whatsapp,
+        payload: {
+          customerName: updatedReservation.customerName,
+          service: updatedReservation.service,
+          serviceDate: updatedReservation.serviceDate,
+          arrivalTime: updatedReservation.arrivalTime,
+          partySize: updatedReservation.partySize,
+          reservationCode: id,
+          fromStatus: previousStatus,
+          toStatus: status,
+        },
+      }));
     });
   } catch (error) {
     if (error instanceof Error && error.message === 'NOT_FOUND') {

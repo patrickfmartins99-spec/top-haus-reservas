@@ -8,7 +8,7 @@ Primeira base do sistema de reservas do restaurante Top Haus, preparada para Nex
 - Horários de chegada e tolerância configurados conforme as regras do restaurante.
 - Grupos de até 20 pessoas com confirmação automática e grupos maiores sujeitos a aprovação.
 - Limite transacional de 70 lugares por serviço.
-- Preferências de sofá, parede de vidro e parede com tomada.
+- Fila de espera com tempo decorrido calculado automaticamente a partir do horário de entrada.
 - Login individual da equipe com Firebase Authentication.
 - Login por nome de usuário, com e-mail técnico invisível gerado automaticamente.
 - Gestão administrativa para criar, bloquear, desbloquear e redefinir acessos.
@@ -47,7 +47,11 @@ Depois, cadastre as demais variáveis de ambiente e execute uma implantação de
 
 O endereço `/api/status` verifica no servidor se Firebase Authentication e Firestore estão realmente acessíveis. A página de entrada da equipe exibe esse resultado sem revelar nenhuma credencial.
 
-Para mensagens automáticas, use a API oficial WhatsApp Business Platform da Meta. O número sozinho não é suficiente: as variáveis `WHATSAPP_*` precisam ser cadastradas no Netlify e os modelos de confirmação, aprovação e lembrete devem estar aprovados pela Meta.
+## Robô de WhatsApp
+
+Cada ação que pode gerar uma mensagem cria um documento na coleção `whatsappQueue`. O robô executado no computador do restaurante pode acompanhar essa coleção em tempo real, escolher o texto pelo campo `eventType`, enviar a mensagem e atualizar o documento de `pending` para `sent` ou `failed`.
+
+Os eventos contêm somente os dados operacionais necessários: telefone de destino, tipo da ação, código da reserva ou da fila e os dados usados na mensagem. Tokens e credenciais do WhatsApp nunca devem ser gravados no Firestore nem enviados ao navegador.
 
 ## Documentação do produto
 

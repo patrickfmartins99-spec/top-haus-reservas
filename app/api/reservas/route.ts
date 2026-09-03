@@ -11,6 +11,7 @@ import {
 import { requireStaff } from '@/lib/auth/staff-request';
 import { getOperationalSettings } from '@/lib/domain/operational-settings';
 import { getAdminDatabase } from '@/lib/firebase/admin';
+import { createWhatsAppOutboxEvent } from '@/lib/firebase/whatsapp-outbox';
 
 function serializeTimestamp(value: unknown) {
   if (value && typeof value === 'object' && 'toDate' in value && typeof value.toDate === 'function') {
@@ -37,7 +38,6 @@ export async function GET(request: Request) {
       service: String(data.service ?? ''),
       serviceDate: String(data.serviceDate ?? ''),
       arrivalTime: String(data.arrivalTime ?? ''),
-      seatingPreference: String(data.seatingPreference ?? 'sem_preferencia'),
       notes: String(data.notes ?? ''),
       status: String(data.status ?? 'confirmed'),
       source: String(data.source ?? 'customer_web'),
@@ -86,6 +86,7 @@ export async function POST(request: Request) {
   const specialDateRef = database.collection('specialDates').doc(serviceKey);
   const reservationRef = database.collection('reservations').doc();
   const auditRef = database.collection('auditLogs').doc();
+  const whatsappEventRef = database.collection('whatsappQueue').doc();
 
   try {
     await database.runTransaction(async (transaction) => {
@@ -134,6 +135,21 @@ export async function POST(request: Request) {
         toStatus: status,
         createdAt: FieldValue.serverTimestamp(),
       });
+      transaction.set(whatsappEventRef, createWhatsAppOutboxEvent({
+        eventType: status === 'confirmed' ? 'reservation_confirmed' : 'reservation_pending_approval',
+        entityType: 'reservation',
+        entityId: reservationRef.id,
+        whatsapp: payload.whatsapp,
+        payload: {
+          customerName: payload.customerName.trim(),
+          service: payload.service,
+          serviceDate: payload.serviceDate,
+          arrivalTime: payload.arrivalTime,
+          partySize: payload.partySize,
+          reservationCode: reservationRef.id,
+          status,
+        },
+      }));
     });
   } catch (error) {
     if (error instanceof Error && error.message === 'CLOSED_DATE') {

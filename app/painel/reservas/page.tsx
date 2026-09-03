@@ -26,7 +26,6 @@ type Reservation = {
   service: string;
   serviceDate: string;
   arrivalTime: string;
-  seatingPreference: string;
   status: string;
   source: string;
   notes: string;
@@ -203,7 +202,6 @@ export default function ReservationsPage() {
               <div className="space-y-2"><Label htmlFor="edit-reservation-service">Serviço</Label><NativeSelect id="edit-reservation-service" value={editingReservation.service} onChange={(event) => changeDraftService(event.target.value)} className="w-full"><NativeSelectOption value="almoco">Almoço</NativeSelectOption><NativeSelectOption value="rodizio">Rodízio</NativeSelectOption></NativeSelect></div>
               <div className="space-y-2"><Label htmlFor="edit-reservation-time">Horário</Label><NativeSelect id="edit-reservation-time" value={editingReservation.arrivalTime} onChange={(event) => updateDraft('arrivalTime', event.target.value)} className="w-full">{times[editingReservation.service].map((time) => <NativeSelectOption key={time} value={time}>{time}</NativeSelectOption>)}</NativeSelect></div>
               <div className="space-y-2"><Label htmlFor="edit-reservation-party">Pessoas</Label><Input id="edit-reservation-party" type="number" value={editingReservation.partySize} onChange={(event) => updateDraft('partySize', Number(event.target.value))} min={1} required /></div>
-              <div className="space-y-2"><Label htmlFor="edit-reservation-preference">Preferência</Label><NativeSelect id="edit-reservation-preference" value={editingReservation.seatingPreference} onChange={(event) => updateDraft('seatingPreference', event.target.value)} className="w-full"><NativeSelectOption value="sem_preferencia">Sem preferência</NativeSelectOption><NativeSelectOption value="sofa">Sofá lateral</NativeSelectOption><NativeSelectOption value="parede_vidro">Parede de vidro</NativeSelectOption><NativeSelectOption value="parede_tomada">Parede com tomada</NativeSelectOption></NativeSelect></div>
               <div className="space-y-2"><Label htmlFor="edit-reservation-status">Situação</Label><NativeSelect id="edit-reservation-status" value={editingReservation.status} onChange={(event) => updateDraft('status', event.target.value)} className="w-full"><NativeSelectOption value="pending_approval">Aguardando aprovação</NativeSelectOption><NativeSelectOption value="confirmed">Confirmada</NativeSelectOption><NativeSelectOption value="presence_confirmed">Presença confirmada</NativeSelectOption><NativeSelectOption value="seated">Cliente chegou</NativeSelectOption><NativeSelectOption value="completed">Concluída</NativeSelectOption><NativeSelectOption value="cancelled">Cancelada</NativeSelectOption><NativeSelectOption value="no_show">Não compareceu</NativeSelectOption></NativeSelect></div>
               <div className="space-y-2 sm:col-span-2"><Label htmlFor="edit-reservation-notes">Observações</Label><Textarea id="edit-reservation-notes" value={editingReservation.notes} onChange={(event) => updateDraft('notes', event.target.value)} maxLength={1000} /></div>
             </div>

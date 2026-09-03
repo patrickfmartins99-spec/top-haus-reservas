@@ -9,8 +9,6 @@ export type ReservationStatus =
   | 'no_show'
   | 'completed';
 
-export type SeatingPreference = 'sem_preferencia' | 'sofa' | 'parede_vidro' | 'parede_tomada';
-
 export interface CreateReservationInput {
   service: ServiceType;
   serviceDate: string;
@@ -18,7 +16,6 @@ export interface CreateReservationInput {
   partySize: number;
   customerName: string;
   whatsapp: string;
-  seatingPreference: SeatingPreference;
   notes?: string;
 }
 
@@ -49,7 +46,6 @@ export function isReservationInput(value: unknown): value is CreateReservationIn
     input.customerName.trim().length >= 2 &&
     typeof input.whatsapp === 'string' &&
     input.whatsapp.replace(/\D/g, '').length >= 10 &&
-    ['sem_preferencia', 'sofa', 'parede_vidro', 'parede_tomada'].includes(String(input.seatingPreference)) &&
     (input.notes === undefined || typeof input.notes === 'string')
   );
 }

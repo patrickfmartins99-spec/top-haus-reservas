@@ -10,7 +10,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
+import { calledDurationMilliseconds, formatDurationClock, waitDurationMilliseconds } from '@/lib/domain/waitlist-time';
 import { getFirebaseClient } from '@/lib/firebase/client';
 import { buildWhatsAppUrl } from '@/lib/whatsapp';
 
@@ -20,10 +20,9 @@ type QueueEntry = {
   customerName: string;
   whatsapp: string;
   partySize: number;
-  seatingPreference: string;
-  estimatedMinutes: number;
   status: QueueStatus;
   enteredAt: string | null;
+  calledAt: string | null;
 };
 
 const statusLabel: Record<QueueStatus, string> = {
@@ -63,8 +62,7 @@ export default function WaitlistPage() {
   const [customerName, setCustomerName] = useState('');
   const [whatsapp, setWhatsapp] = useState('');
   const [partySize, setPartySize] = useState('2');
-  const [estimatedMinutes, setEstimatedMinutes] = useState('15');
-  const [seatingPreference, setSeatingPreference] = useState('sem_preferencia');
+  const [now, setNow] = useState(() => Date.now());
 
   const loadQueue = useCallback(async (user: User) => {
     const response = await staffRequest(user, '/api/fila');
@@ -88,6 +86,11 @@ export default function WaitlistPage() {
     });
   }, [loadQueue]);
 
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+
   const activeQueue = useMemo(() => queue.filter((entry) => entry.status === 'waiting' || entry.status === 'called'), [queue]);
 
   function openNewEntry() {
@@ -95,8 +98,6 @@ export default function WaitlistPage() {
     setCustomerName('');
     setWhatsapp('');
     setPartySize('2');
-    setEstimatedMinutes('15');
-    setSeatingPreference('sem_preferencia');
     setError('');
     setSuccess('');
     setDialogOpen(true);
@@ -107,8 +108,6 @@ export default function WaitlistPage() {
     setCustomerName(entry.customerName);
     setWhatsapp(entry.whatsapp);
     setPartySize(String(entry.partySize));
-    setEstimatedMinutes(String(entry.estimatedMinutes));
-    setSeatingPreference(entry.seatingPreference);
     setError('');
     setSuccess('');
     setDialogOpen(true);
@@ -121,12 +120,12 @@ export default function WaitlistPage() {
     try {
       const response = await staffRequest(currentUser, editingEntry ? `/api/fila/${editingEntry.id}` : '/api/fila', {
         method: editingEntry ? 'PATCH' : 'POST',
-        body: JSON.stringify({ customerName, whatsapp, partySize: Number(partySize), estimatedMinutes: Number(estimatedMinutes), seatingPreference }),
+        body: JSON.stringify({ customerName, whatsapp, partySize: Number(partySize) }),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? 'Não foi possível salvar o cliente.');
       const edited = Boolean(editingEntry);
-      setCustomerName(''); setWhatsapp(''); setPartySize('2'); setEstimatedMinutes('15'); setSeatingPreference('sem_preferencia');
+      setCustomerName(''); setWhatsapp(''); setPartySize('2');
       setEditingEntry(null);
       setDialogOpen(false);
       setSuccess(edited ? 'Dados do cliente atualizados com sucesso.' : 'Cliente adicionado à fila. O WhatsApp ficou registrado para a notificação.');
@@ -135,6 +134,12 @@ export default function WaitlistPage() {
       setError(caughtError instanceof Error ? caughtError.message : 'Não foi possível salvar o cliente.');
     } finally { setSaving(false); }
   }
+
+  const waitingQueue = activeQueue.filter((entry) => entry.status === 'waiting');
+  const calledQueue = activeQueue.filter((entry) => entry.status === 'called');
+  const longestWait = waitingQueue.length
+    ? Math.max(...waitingQueue.map((entry) => waitDurationMilliseconds(entry, now) ?? 0))
+    : null;
 
   async function updateStatus(entry: QueueEntry, status: QueueStatus) {
     if (!currentUser) return;
@@ -158,10 +163,11 @@ export default function WaitlistPage() {
       {error ? <p className="rounded-xl bg-destructive/10 px-4 py-3 text-sm font-medium text-destructive" role="alert">{error}</p> : null}
       {success ? <output className="block rounded-xl bg-black px-4 py-3 text-sm font-medium text-white">{success}</output> : null}
 
-      <div className="grid gap-4 sm:grid-cols-3">{[
-        { label: 'Aguardando', value: activeQueue.filter((item) => item.status === 'waiting').length, icon: Clock3 },
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">{[
+        { label: 'Aguardando', value: waitingQueue.length, icon: Clock3 },
+        { label: 'Chamados', value: calledQueue.length, icon: PhoneCall },
         { label: 'Pessoas na fila', value: activeQueue.reduce((sum, item) => sum + item.partySize, 0), icon: Users },
-        { label: 'Tempo estimado', value: activeQueue.length ? `${Math.max(...activeQueue.map((item) => item.estimatedMinutes))} min` : '—', icon: MessageCircle },
+        { label: 'Maior espera atual', value: longestWait === null ? '—' : formatDurationClock(longestWait), icon: MessageCircle },
       ].map(({ label, value, icon: Icon }) => <Card key={label} className="bg-white ring-black/7"><CardContent className="flex items-center justify-between"><div><p className="text-sm text-black/65">{label}</p><p className="mt-2 text-2xl font-extrabold">{value}</p></div><span className="grid size-10 place-items-center rounded-xl bg-[#eadcd2] text-haus-terracotta"><Icon /></span></CardContent></Card>)}</div>
 
       <Card className="bg-white ring-black/7"><CardHeader className="border-b border-black/7"><CardTitle>Ordem de atendimento</CardTitle><p className="text-sm text-black/65">Dados salvos no Firebase e compartilhados com toda a equipe.</p></CardHeader><CardContent className="space-y-3">
@@ -169,7 +175,9 @@ export default function WaitlistPage() {
         {!loading && activeQueue.length === 0 ? <p className="py-10 text-center text-sm text-black/65">Nenhum cliente aguardando no momento.</p> : null}
         {activeQueue.map((entry, index) => {
           const whatsappUrl = buildWhatsAppUrl(entry.whatsapp, `Olá, ${entry.customerName}! Sua mesa no Top Haus está disponível. Por favor, dirija-se à recepção. A mesa será mantida por 10 minutos.`);
-          return <article key={entry.id} className={`flex flex-col gap-4 rounded-xl border p-4 sm:flex-row sm:items-center ${entry.status === 'called' ? 'border-haus-terracotta/35 bg-[#f4e7d7]' : 'border-black/8'}`}><span className="grid size-9 shrink-0 place-items-center rounded-full bg-black text-sm font-bold text-white">{index + 1}</span><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><p className="font-bold">{entry.customerName}</p><Badge className={entry.status === 'called' ? 'bg-haus-terracotta text-white' : 'bg-[#e7e1db] text-[#4f3528]'}>{statusLabel[entry.status]}</Badge></div><p className="mt-1 text-sm font-medium text-black/70">{entry.partySize} pessoas · {entry.estimatedMinutes} min · {formatPhone(entry.whatsapp)}</p></div><div className="flex flex-wrap gap-2"><Button disabled={saving} variant="outline" onClick={() => openEditEntry(entry)}><Pencil /> Editar</Button>{entry.status === 'waiting' ? <Button disabled={saving} onClick={() => updateStatus(entry, 'called')} className="bg-haus-terracotta text-white hover:bg-haus-terracotta/90"><PhoneCall /> Chamar</Button> : null}{entry.status === 'called' && whatsappUrl ? <a href={whatsappUrl} target="_blank" rel="noreferrer" className={buttonVariants({ variant: 'outline', className: 'border-haus-terracotta/30 text-haus-terracotta' })}><MessageCircle /> WhatsApp</a> : null}{entry.status === 'called' ? <Button disabled={saving} onClick={() => updateStatus(entry, 'seated')} className="bg-black text-white hover:bg-black/85"><Check /> Marcar atendido</Button> : null}<Button disabled={saving} variant="outline" onClick={() => updateStatus(entry, 'removed')}><UserRoundX /> Remover</Button></div></article>;
+          const waitTime = formatDurationClock(waitDurationMilliseconds(entry, now));
+          const calledTime = calledDurationMilliseconds(entry, now);
+          return <article key={entry.id} className={`flex flex-col gap-4 rounded-xl border p-4 sm:flex-row sm:items-center ${entry.status === 'called' ? 'border-haus-terracotta/35 bg-[#f4e7d7]' : 'border-black/8'}`}><span className="grid size-9 shrink-0 place-items-center rounded-full bg-black text-sm font-bold text-white">{index + 1}</span><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><p className="font-bold">{entry.customerName}</p><Badge className={entry.status === 'called' ? 'bg-haus-terracotta text-white' : 'bg-[#e7e1db] text-[#4f3528]'}>{statusLabel[entry.status]}</Badge></div><p className="mt-1 text-sm font-medium text-black/75">{entry.partySize} pessoas · {formatPhone(entry.whatsapp)}</p><p className="mt-1 font-mono text-sm font-bold text-black">{entry.status === 'called' ? `Aguardou ${waitTime}${calledTime === null ? '' : ` · chamado há ${formatDurationClock(calledTime)}`}` : `Aguardando há ${waitTime}`}</p></div><div className="flex flex-wrap gap-2"><Button disabled={saving} variant="outline" onClick={() => openEditEntry(entry)}><Pencil /> Editar</Button>{entry.status === 'waiting' ? <Button disabled={saving} onClick={() => updateStatus(entry, 'called')} className="bg-haus-terracotta text-white hover:bg-haus-terracotta/90"><PhoneCall /> Chamar</Button> : null}{entry.status === 'called' && whatsappUrl ? <a href={whatsappUrl} target="_blank" rel="noreferrer" className={buttonVariants({ variant: 'outline', className: 'border-haus-terracotta/30 text-haus-terracotta' })}><MessageCircle /> WhatsApp</a> : null}{entry.status === 'called' ? <Button disabled={saving} onClick={() => updateStatus(entry, 'seated')} className="bg-black text-white hover:bg-black/85"><Check /> Marcar atendido</Button> : null}<Button disabled={saving} variant="outline" onClick={() => updateStatus(entry, 'removed')}><UserRoundX /> Remover</Button></div></article>;
         })}
       </CardContent></Card>
 
@@ -181,9 +189,7 @@ export default function WaitlistPage() {
             <div className="grid gap-4 py-5 sm:grid-cols-2">
               <div className="space-y-2 sm:col-span-2"><Label htmlFor="queue-name">Nome do cliente</Label><Input id="queue-name" value={customerName} onChange={(event) => setCustomerName(event.target.value)} minLength={2} required /></div>
               <div className="space-y-2 sm:col-span-2"><Label htmlFor="queue-whatsapp">WhatsApp</Label><Input id="queue-whatsapp" value={whatsapp} onChange={(event) => setWhatsapp(event.target.value)} placeholder="(47) 99999-9999" inputMode="tel" minLength={10} required /></div>
-              <div className="space-y-2"><Label htmlFor="queue-party">Pessoas</Label><Input id="queue-party" type="number" value={partySize} onChange={(event) => setPartySize(event.target.value)} min={1} required /></div>
-              <div className="space-y-2"><Label htmlFor="queue-estimate">Estimativa (min)</Label><Input id="queue-estimate" type="number" value={estimatedMinutes} onChange={(event) => setEstimatedMinutes(event.target.value)} min={1} required /></div>
-              <div className="space-y-2 sm:col-span-2"><Label htmlFor="queue-preference">Preferência</Label><NativeSelect id="queue-preference" value={seatingPreference} onChange={(event) => setSeatingPreference(event.target.value)} className="w-full"><NativeSelectOption value="sem_preferencia">Sem preferência</NativeSelectOption><NativeSelectOption value="sofa">Sofá lateral</NativeSelectOption><NativeSelectOption value="parede_vidro">Parede de vidro</NativeSelectOption><NativeSelectOption value="parede_tomada">Parede com tomada</NativeSelectOption></NativeSelect></div>
+              <div className="space-y-2 sm:col-span-2"><Label htmlFor="queue-party">Pessoas</Label><Input id="queue-party" type="number" value={partySize} onChange={(event) => setPartySize(event.target.value)} min={1} required /></div>
             </div>
             <DialogFooter><Button type="button" variant="outline" onClick={() => setDialogOpen(false)}>Cancelar</Button><Button type="submit" disabled={saving} className="bg-black text-white hover:bg-black/85">{saving ? <LoaderCircle className="animate-spin" /> : editingEntry ? <Save /> : <Plus />} {editingEntry ? 'Salvar alterações' : 'Adicionar cliente'}</Button></DialogFooter>
           </form>

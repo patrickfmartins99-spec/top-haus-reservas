@@ -3,9 +3,9 @@ import { NextResponse } from 'next/server';
 
 import { requireStaff } from '@/lib/auth/staff-request';
 import { getAdminDatabase } from '@/lib/firebase/admin';
+import { createWhatsAppOutboxEvent, type WhatsAppEventType } from '@/lib/firebase/whatsapp-outbox';
 
 const allowedStatuses = ['waiting', 'called', 'seated', 'removed'];
-const preferences = ['sem_preferencia', 'sofa', 'parede_vidro', 'parede_tomada'];
 
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const context = await requireStaff(request);
@@ -13,7 +13,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
 
   const payload = await request.json().catch(() => null) as Record<string, unknown> | null;
   const status = typeof payload?.status === 'string' ? payload.status : null;
-  const hasDetails = payload?.customerName !== undefined || payload?.whatsapp !== undefined || payload?.partySize !== undefined || payload?.estimatedMinutes !== undefined || payload?.seatingPreference !== undefined;
+  const hasDetails = payload?.customerName !== undefined || payload?.whatsapp !== undefined || payload?.partySize !== undefined;
   if ((!status && !hasDetails) || (status && !allowedStatuses.includes(status))) return NextResponse.json({ error: 'Alteração inválida.' }, { status: 400 });
 
   const database = getAdminDatabase();
@@ -35,20 +35,29 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     const customerName = typeof payload?.customerName === 'string' ? payload.customerName.trim() : '';
     const whatsapp = typeof payload?.whatsapp === 'string' ? payload.whatsapp.replace(/\D/g, '') : '';
     const partySize = Number(payload?.partySize);
-    const estimatedMinutes = Number(payload?.estimatedMinutes);
-    const seatingPreference = typeof payload?.seatingPreference === 'string' ? payload.seatingPreference : '';
-    if (customerName.length < 2 || whatsapp.length < 10 || !Number.isInteger(partySize) || partySize < 1 || !Number.isInteger(estimatedMinutes) || estimatedMinutes < 1 || !preferences.includes(seatingPreference)) {
+    if (customerName.length < 2 || whatsapp.length < 10 || !Number.isInteger(partySize) || partySize < 1) {
       return NextResponse.json({ error: 'Revise os dados do cliente na fila.' }, { status: 400 });
     }
-    Object.assign(updates, { customerName, whatsapp, partySize, estimatedMinutes, seatingPreference });
+    Object.assign(updates, { customerName, whatsapp, partySize });
   }
 
   if (status) Object.assign(updates, {
     status,
     ...(status === 'called' ? { calledAt: FieldValue.serverTimestamp(), notificationStatus: 'pending_whatsapp_integration' } : {}),
     ...(status === 'seated' ? { seatedAt: FieldValue.serverTimestamp() } : {}),
+    ...(status === 'removed' ? { removedAt: FieldValue.serverTimestamp() } : {}),
   });
 
+  const eventType: WhatsAppEventType = status === 'called'
+    ? 'waitlist_called'
+    : status === 'seated'
+      ? 'waitlist_seated'
+      : status === 'removed'
+        ? 'waitlist_removed'
+        : 'waitlist_updated';
+  const nextWhatsapp = String(updates.whatsapp ?? previous.whatsapp ?? '');
+  const nextCustomerName = String(updates.customerName ?? previous.customerName ?? '');
+  const nextPartySize = Number(updates.partySize ?? previous.partySize ?? 0);
   const batch = database.batch();
   batch.update(entryRef, updates);
   batch.set(database.collection('auditLogs').doc(), {
@@ -64,20 +73,28 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
           customerName: String(previous.customerName ?? ''),
           whatsapp: String(previous.whatsapp ?? ''),
           partySize: Number(previous.partySize ?? 0),
-          estimatedMinutes: Number(previous.estimatedMinutes ?? 0),
-          seatingPreference: String(previous.seatingPreference ?? ''),
         },
         after: {
           customerName: updates.customerName,
           whatsapp: updates.whatsapp,
           partySize: updates.partySize,
-          estimatedMinutes: updates.estimatedMinutes,
-          seatingPreference: updates.seatingPreference,
         },
       },
     } : {}),
     createdAt: FieldValue.serverTimestamp(),
   });
+  batch.set(database.collection('whatsappQueue').doc(), createWhatsAppOutboxEvent({
+    eventType: status ? eventType : 'waitlist_updated',
+    entityType: 'waitlist',
+    entityId: id,
+    whatsapp: nextWhatsapp,
+    payload: {
+      customerName: nextCustomerName,
+      partySize: nextPartySize,
+      fromStatus: previousStatus,
+      toStatus: status ?? previousStatus,
+    },
+  }));
   await batch.commit();
 
   return NextResponse.json({ ok: true });

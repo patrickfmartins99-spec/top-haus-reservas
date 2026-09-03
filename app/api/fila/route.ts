@@ -3,8 +3,7 @@ import { NextResponse } from 'next/server';
 
 import { requireStaff } from '@/lib/auth/staff-request';
 import { getAdminDatabase } from '@/lib/firebase/admin';
-
-const preferences = ['sem_preferencia', 'sofa', 'parede_vidro', 'parede_tomada'];
+import { createWhatsAppOutboxEvent } from '@/lib/firebase/whatsapp-outbox';
 
 function serializeTimestamp(value: unknown) {
   if (value && typeof value === 'object' && 'toDate' in value && typeof value.toDate === 'function') {
@@ -28,10 +27,11 @@ export async function GET(request: Request) {
       customerName: String(data.customerName ?? ''),
       whatsapp: String(data.whatsapp ?? ''),
       partySize: Number(data.partySize ?? 0),
-      seatingPreference: String(data.seatingPreference ?? 'sem_preferencia'),
-      estimatedMinutes: Number(data.estimatedMinutes ?? 15),
       status: String(data.status ?? 'waiting'),
       enteredAt: serializeTimestamp(data.enteredAt),
+      calledAt: serializeTimestamp(data.calledAt),
+      seatedAt: serializeTimestamp(data.seatedAt),
+      removedAt: serializeTimestamp(data.removedAt),
     };
   });
 
@@ -46,24 +46,21 @@ export async function POST(request: Request) {
   const customerName = typeof payload?.customerName === 'string' ? payload.customerName.trim() : '';
   const whatsapp = typeof payload?.whatsapp === 'string' ? payload.whatsapp.replace(/\D/g, '') : '';
   const partySize = Number(payload?.partySize);
-  const seatingPreference = typeof payload?.seatingPreference === 'string' ? payload.seatingPreference : 'sem_preferencia';
-  const estimatedMinutes = Number(payload?.estimatedMinutes ?? 15);
 
-  if (customerName.length < 2 || whatsapp.length < 10 || !Number.isInteger(partySize) || partySize < 1 || !preferences.includes(seatingPreference) || !Number.isInteger(estimatedMinutes) || estimatedMinutes < 1) {
-    return NextResponse.json({ error: 'Preencha nome, WhatsApp, quantidade de pessoas e estimativa.' }, { status: 400 });
+  if (customerName.length < 2 || whatsapp.length < 10 || !Number.isInteger(partySize) || partySize < 1) {
+    return NextResponse.json({ error: 'Preencha nome, WhatsApp e quantidade de pessoas.' }, { status: 400 });
   }
 
   const database = getAdminDatabase();
   if (!database) return NextResponse.json({ error: 'Firebase não configurado.' }, { status: 503 });
 
   const entryRef = database.collection('waitlist').doc();
+  const whatsappEventRef = database.collection('whatsappQueue').doc();
   const batch = database.batch();
   batch.set(entryRef, {
     customerName,
     whatsapp,
     partySize,
-    seatingPreference,
-    estimatedMinutes,
     status: 'waiting',
     notificationStatus: 'pending_whatsapp_integration',
     enteredAt: FieldValue.serverTimestamp(),
@@ -75,9 +72,16 @@ export async function POST(request: Request) {
     actorType: 'staff',
     actorId: context.decodedToken.uid,
     action: 'waitlist_created',
-    changes: { customerName, partySize, estimatedMinutes },
+    changes: { customerName, partySize },
     createdAt: FieldValue.serverTimestamp(),
   });
+  batch.set(whatsappEventRef, createWhatsAppOutboxEvent({
+    eventType: 'waitlist_created',
+    entityType: 'waitlist',
+    entityId: entryRef.id,
+    whatsapp,
+    payload: { customerName, partySize },
+  }));
   await batch.commit();
 
   return NextResponse.json({ id: entryRef.id }, { status: 201 });

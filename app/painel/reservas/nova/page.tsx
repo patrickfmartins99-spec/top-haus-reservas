@@ -35,7 +35,6 @@ export default function NewReservationPage() {
   const [service, setService] = useState<Service>('almoco');
   const [arrivalTime, setArrivalTime] = useState('11:00');
   const [partySize, setPartySize] = useState('2');
-  const [seatingPreference, setSeatingPreference] = useState('sem_preferencia');
   const [notes, setNotes] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -63,7 +62,7 @@ export default function NewReservationPage() {
       const response = await fetch('/api/reservas', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ customerName, whatsapp, serviceDate, service, arrivalTime, partySize: Number(partySize), seatingPreference, notes }),
+        body: JSON.stringify({ customerName, whatsapp, serviceDate, service, arrivalTime, partySize: Number(partySize), notes }),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? 'Não foi possível criar a reserva.');
@@ -85,7 +84,6 @@ export default function NewReservationPage() {
           <div className="space-y-2"><Label htmlFor="service">Serviço</Label><NativeSelect id="service" value={service} onChange={(event) => changeService(event.target.value as Service)} className="w-full"><NativeSelectOption value="almoco">Almoço — chegada até 11h30</NativeSelectOption><NativeSelectOption value="rodizio">Rodízio — chegada até 19h</NativeSelectOption></NativeSelect></div>
           <div className="space-y-2"><Label htmlFor="arrival-time">Horário de chegada</Label><NativeSelect id="arrival-time" value={arrivalTime} onChange={(event) => setArrivalTime(event.target.value)} className="w-full">{times[service].map((time) => <NativeSelectOption key={time} value={time}>{time}</NativeSelectOption>)}</NativeSelect></div>
           <div className="space-y-2"><Label htmlFor="party-size">Número de pessoas</Label><Input id="party-size" type="number" value={partySize} onChange={(event) => setPartySize(event.target.value)} min={1} required /></div>
-          <div className="space-y-2 sm:col-span-2"><Label htmlFor="preference">Preferência de lugar</Label><NativeSelect id="preference" value={seatingPreference} onChange={(event) => setSeatingPreference(event.target.value)} className="w-full"><NativeSelectOption value="sem_preferencia">Sem preferência</NativeSelectOption><NativeSelectOption value="sofa">Sofá lateral</NativeSelectOption><NativeSelectOption value="parede_vidro">Parede de vidro</NativeSelectOption><NativeSelectOption value="parede_tomada">Parede com tomada</NativeSelectOption></NativeSelect></div>
           <div className="space-y-2 sm:col-span-2"><Label htmlFor="notes">Observações</Label><Textarea id="notes" value={notes} onChange={(event) => setNotes(event.target.value)} maxLength={1000} placeholder="Aniversário, acessibilidade, pedidos especiais..." /></div>
           <div className="rounded-xl border border-haus-gold/35 bg-[#f4e7d7] px-4 py-3 text-sm text-black/65 sm:col-span-2"><strong>Confirmação:</strong> até 20 pessoas a reserva será confirmada automaticamente. Grupos maiores ficarão aguardando aprovação.</div>
           <div className="flex flex-wrap justify-end gap-3 sm:col-span-2"><Link href="/painel/reservas" className={buttonVariants({ variant: 'outline' })}>Cancelar</Link><Button type="submit" disabled={saving} className="bg-haus-terracotta text-white hover:bg-haus-terracotta/90">{saving ? <LoaderCircle className="animate-spin" /> : <Save />} Salvar reserva</Button></div>

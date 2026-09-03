@@ -27,7 +27,6 @@ import {
 } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
 import { DEFAULT_OPERATIONAL_SETTINGS, type OperationalSettings } from '@/lib/domain/operational-settings';
@@ -67,7 +66,6 @@ export default function Home() {
   const [checked, setChecked] = useState(false);
   const [customerName, setCustomerName] = useState('');
   const [whatsapp, setWhatsapp] = useState('');
-  const [seatingPreference, setSeatingPreference] = useState('sem_preferencia');
   const [notes, setNotes] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState<{ id: string; status: string } | null>(null);
@@ -120,7 +118,6 @@ export default function Home() {
           partySize,
           customerName,
           whatsapp,
-          seatingPreference,
           notes,
         }),
       });
@@ -299,16 +296,6 @@ export default function Home() {
                         <Label htmlFor="whatsapp">WhatsApp</Label>
                         <Input id="whatsapp" value={whatsapp} onChange={(event) => setWhatsapp(event.target.value)} className="h-11 border-black/12 bg-white" placeholder="(00) 00000-0000" inputMode="tel" required />
                       </div>
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="preference">Preferência de lugar</Label>
-                      <NativeSelect id="preference" value={seatingPreference} onChange={(event) => setSeatingPreference(event.target.value)} className="w-full [&>select]:h-11 [&>select]:border-black/12 [&>select]:bg-white">
-                        <NativeSelectOption value="sem_preferencia">Sem preferência</NativeSelectOption>
-                        <NativeSelectOption value="sofa">Sofá lateral</NativeSelectOption>
-                        <NativeSelectOption value="parede_vidro">Parede de vidro</NativeSelectOption>
-                        <NativeSelectOption value="parede_tomada">Parede com tomada</NativeSelectOption>
-                      </NativeSelect>
-                      <p className="text-xs text-haus-ink/45">A preferência depende da disponibilidade e não garante a mesa escolhida.</p>
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="notes">Observações</Label>
