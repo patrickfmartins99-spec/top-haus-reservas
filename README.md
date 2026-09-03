@@ -49,9 +49,11 @@ O endereço `/api/status` verifica no servidor se Firebase Authentication e Fire
 
 ## Robô de WhatsApp
 
-Cada ação que pode gerar uma mensagem cria um documento na coleção `whatsappQueue`. O robô executado no computador do restaurante pode acompanhar essa coleção em tempo real, escolher o texto pelo campo `eventType`, enviar a mensagem e atualizar o documento de `pending` para `sent` ou `failed`.
+Cada ação que pode gerar uma mensagem cria um documento na coleção `whatsappQueue`. O robô executado no computador do restaurante acompanha essa coleção em tempo real, escolhe o texto pelo campo `eventType`, envia a mensagem e atualiza o documento de `pending` para `sent`, `failed` ou `ignored`.
 
 Os eventos contêm somente os dados operacionais necessários: telefone de destino, tipo da ação, código da reserva ou da fila e os dados usados na mensagem. Tokens e credenciais do WhatsApp nunca devem ser gravados no Firestore nem enviados ao navegador.
+
+A implementação local e as instruções de primeira configuração estão em `whatsapp-robot/README.md`. A chamada da fila informa que a mesa permanece disponível por 3 minutos; a fila nunca comunica uma estimativa de espera.
 
 ## Documentação do produto
 

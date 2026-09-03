@@ -93,13 +93,6 @@ export async function PATCH(request: Request) {
       const batch = result.database.batch();
       batch.update(result.reference, { status: 'presence_confirmed', updatedAt: FieldValue.serverTimestamp(), updatedBy: 'customer' });
       batch.set(result.database.collection('auditLogs').doc(), { reservationId: result.reference.id, actorType: 'customer', actorId: null, action: 'reservation_presence_confirmed', fromStatus: currentStatus, toStatus: 'presence_confirmed', createdAt: FieldValue.serverTimestamp() });
-      batch.set(result.database.collection('whatsappQueue').doc(), createWhatsAppOutboxEvent({
-        eventType: 'reservation_presence_confirmed',
-        entityType: 'reservation',
-        entityId: result.reference.id,
-        whatsapp: String(current.whatsapp ?? ''),
-        payload: { customerName: String(current.customerName ?? ''), reservationCode: result.reference.id, serviceDate: String(current.serviceDate ?? ''), arrivalTime: String(current.arrivalTime ?? ''), partySize: Number(current.partySize ?? 0) },
-      }));
       await batch.commit();
     }
   }
@@ -121,7 +114,7 @@ export async function PATCH(request: Request) {
         entityType: 'reservation',
         entityId: result.reference.id,
         whatsapp: String(freshData.whatsapp ?? ''),
-        payload: { customerName: String(freshData.customerName ?? ''), reservationCode: result.reference.id, serviceDate: String(freshData.serviceDate ?? ''), arrivalTime: String(freshData.arrivalTime ?? ''), partySize: Number(freshData.partySize ?? 0), fromStatus: freshStatus, toStatus: 'cancelled' },
+        payload: { customerName: String(freshData.customerName ?? ''), reservationCode: result.reference.id, service: String(freshData.service ?? ''), serviceDate: String(freshData.serviceDate ?? ''), arrivalTime: String(freshData.arrivalTime ?? ''), partySize: Number(freshData.partySize ?? 0), fromStatus: freshStatus, toStatus: 'cancelled' },
       }));
     });
   }
@@ -176,13 +169,44 @@ export async function PATCH(request: Request) {
         };
         transaction.update(result.reference, { ...updated, updatedAt: FieldValue.serverTimestamp(), updatedBy: 'customer' });
         transaction.set(result.database.collection('auditLogs').doc(), { reservationId: result.reference.id, actorType: 'customer', actorId: null, action: 'reservation_updated_by_customer', fromStatus: freshStatus, toStatus: nextStatus, changes: { before: fresh, after: updated }, createdAt: FieldValue.serverTimestamp() });
-        transaction.set(result.database.collection('whatsappQueue').doc(), createWhatsAppOutboxEvent({
-          eventType: 'reservation_updated',
-          entityType: 'reservation',
-          entityId: result.reference.id,
-          whatsapp: updated.whatsapp,
-          payload: { customerName: updated.customerName, reservationCode: result.reference.id, service: updated.service, serviceDate: updated.serviceDate, arrivalTime: updated.arrivalTime, partySize: updated.partySize, fromStatus: freshStatus, toStatus: nextStatus },
-        }));
+        const reservationDetailsChanged = (
+          String(fresh.customerName ?? '') !== updated.customerName ||
+          digits(fresh.whatsapp) !== updated.whatsapp ||
+          Number(fresh.partySize ?? 0) !== updated.partySize ||
+          String(fresh.service ?? '') !== updated.service ||
+          String(fresh.serviceDate ?? '') !== updated.serviceDate ||
+          String(fresh.arrivalTime ?? '') !== updated.arrivalTime ||
+          String(fresh.notes ?? '') !== updated.notes
+        );
+        if (reservationDetailsChanged) {
+          transaction.set(result.database.collection('whatsappQueue').doc(), createWhatsAppOutboxEvent({
+            eventType: 'reservation_updated',
+            entityType: 'reservation',
+            entityId: result.reference.id,
+            whatsapp: updated.whatsapp,
+            payload: {
+              customerName: updated.customerName,
+              whatsapp: updated.whatsapp,
+              reservationCode: result.reference.id,
+              service: updated.service,
+              serviceDate: updated.serviceDate,
+              arrivalTime: updated.arrivalTime,
+              partySize: updated.partySize,
+              notes: updated.notes,
+              fromStatus: freshStatus,
+              toStatus: nextStatus,
+              previous: {
+                customerName: String(fresh.customerName ?? ''),
+                whatsapp: String(fresh.whatsapp ?? ''),
+                service: String(fresh.service ?? ''),
+                serviceDate: String(fresh.serviceDate ?? ''),
+                arrivalTime: String(fresh.arrivalTime ?? ''),
+                partySize: Number(fresh.partySize ?? 0),
+                notes: String(fresh.notes ?? ''),
+              },
+            },
+          }));
+        }
       });
     } catch (error) {
       if (error instanceof Error && error.message === 'CAPACITY_EXCEEDED') return NextResponse.json({ error: 'A cota de reservas deste serviço está completa.' }, { status: 409 });

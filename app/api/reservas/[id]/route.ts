@@ -156,29 +156,51 @@ export async function PATCH(request: Request, { params }: RouteContext<'/api/res
         },
         createdAt: FieldValue.serverTimestamp(),
       });
-      const eventType: WhatsAppEventType = status === 'confirmed' && previousStatus === 'pending_approval'
+      const reservationDetailsChanged = (
+        String(previous.customerName ?? '') !== updatedReservation.customerName ||
+        String(previous.whatsapp ?? '').replace(/\D/g, '') !== updatedReservation.whatsapp ||
+        previousPartySize !== updatedReservation.partySize ||
+        String(previous.service ?? '') !== updatedReservation.service ||
+        String(previous.serviceDate ?? '') !== updatedReservation.serviceDate ||
+        String(previous.arrivalTime ?? '') !== updatedReservation.arrivalTime ||
+        String(previous.notes ?? '') !== updatedReservation.notes
+      );
+      const eventType: WhatsAppEventType | null = status === 'confirmed' && previousStatus === 'pending_approval'
         ? 'reservation_approved'
-        : status === 'cancelled'
+        : status === 'cancelled' && previousStatus !== 'cancelled'
           ? 'reservation_cancelled'
-          : status === 'no_show'
-            ? 'reservation_no_show'
-            : 'reservation_updated';
-      transaction.set(database.collection('whatsappQueue').doc(), createWhatsAppOutboxEvent({
-        eventType,
-        entityType: 'reservation',
-        entityId: id,
-        whatsapp: updatedReservation.whatsapp,
-        payload: {
-          customerName: updatedReservation.customerName,
-          service: updatedReservation.service,
-          serviceDate: updatedReservation.serviceDate,
-          arrivalTime: updatedReservation.arrivalTime,
-          partySize: updatedReservation.partySize,
-          reservationCode: id,
-          fromStatus: previousStatus,
-          toStatus: status,
-        },
-      }));
+          : status !== 'cancelled' && reservationDetailsChanged
+            ? 'reservation_updated'
+            : null;
+      if (eventType) {
+        transaction.set(database.collection('whatsappQueue').doc(), createWhatsAppOutboxEvent({
+          eventType,
+          entityType: 'reservation',
+          entityId: id,
+          whatsapp: updatedReservation.whatsapp,
+          payload: {
+            customerName: updatedReservation.customerName,
+            whatsapp: updatedReservation.whatsapp,
+            service: updatedReservation.service,
+            serviceDate: updatedReservation.serviceDate,
+            arrivalTime: updatedReservation.arrivalTime,
+            partySize: updatedReservation.partySize,
+            notes: updatedReservation.notes,
+            reservationCode: id,
+            fromStatus: previousStatus,
+            toStatus: status,
+            previous: {
+              customerName: String(previous.customerName ?? ''),
+              whatsapp: String(previous.whatsapp ?? ''),
+              service: String(previous.service ?? ''),
+              serviceDate: String(previous.serviceDate ?? ''),
+              arrivalTime: String(previous.arrivalTime ?? ''),
+              partySize: previousPartySize,
+              notes: String(previous.notes ?? ''),
+            },
+          },
+        }));
+      }
     });
   } catch (error) {
     if (error instanceof Error && error.message === 'NOT_FOUND') {

@@ -4,6 +4,8 @@ export type WaitlistTiming = {
   calledAt?: string | null;
 };
 
+export const WAITLIST_CALL_HOLD_MINUTES = 3;
+
 function timeValue(value: string | null | undefined) {
   if (!value) return null;
   const parsed = new Date(value).getTime();

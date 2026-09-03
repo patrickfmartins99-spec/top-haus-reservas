@@ -2,8 +2,9 @@ import { FieldValue } from 'firebase-admin/firestore';
 import { NextResponse } from 'next/server';
 
 import { requireStaff } from '@/lib/auth/staff-request';
+import { WAITLIST_CALL_HOLD_MINUTES } from '@/lib/domain/waitlist-time';
 import { getAdminDatabase } from '@/lib/firebase/admin';
-import { createWhatsAppOutboxEvent, type WhatsAppEventType } from '@/lib/firebase/whatsapp-outbox';
+import { createWhatsAppOutboxEvent } from '@/lib/firebase/whatsapp-outbox';
 
 const allowedStatuses = ['waiting', 'called', 'seated', 'removed'];
 
@@ -48,13 +49,6 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     ...(status === 'removed' ? { removedAt: FieldValue.serverTimestamp() } : {}),
   });
 
-  const eventType: WhatsAppEventType = status === 'called'
-    ? 'waitlist_called'
-    : status === 'seated'
-      ? 'waitlist_seated'
-      : status === 'removed'
-        ? 'waitlist_removed'
-        : 'waitlist_updated';
   const nextWhatsapp = String(updates.whatsapp ?? previous.whatsapp ?? '');
   const nextCustomerName = String(updates.customerName ?? previous.customerName ?? '');
   const nextPartySize = Number(updates.partySize ?? previous.partySize ?? 0);
@@ -83,18 +77,21 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     } : {}),
     createdAt: FieldValue.serverTimestamp(),
   });
-  batch.set(database.collection('whatsappQueue').doc(), createWhatsAppOutboxEvent({
-    eventType: status ? eventType : 'waitlist_updated',
-    entityType: 'waitlist',
-    entityId: id,
-    whatsapp: nextWhatsapp,
-    payload: {
-      customerName: nextCustomerName,
-      partySize: nextPartySize,
-      fromStatus: previousStatus,
-      toStatus: status ?? previousStatus,
-    },
-  }));
+  if (status === 'called' || !status) {
+    batch.set(database.collection('whatsappQueue').doc(), createWhatsAppOutboxEvent({
+      eventType: status === 'called' ? 'waitlist_called' : 'waitlist_updated',
+      entityType: 'waitlist',
+      entityId: id,
+      whatsapp: nextWhatsapp,
+      payload: {
+        customerName: nextCustomerName,
+        partySize: nextPartySize,
+        fromStatus: previousStatus,
+        toStatus: status ?? previousStatus,
+        ...(status === 'called' ? { holdMinutes: WAITLIST_CALL_HOLD_MINUTES } : {}),
+      },
+    }));
+  }
   await batch.commit();
 
   return NextResponse.json({ ok: true });

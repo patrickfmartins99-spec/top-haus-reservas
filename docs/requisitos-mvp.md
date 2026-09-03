@@ -51,8 +51,8 @@ Toda criação, alteração, aprovação, cancelamento e mudança de situação 
 
 ## Fila de espera
 
-Registra nome, WhatsApp, quantidade de pessoas, horário de entrada, posição e situação. O tempo decorrido é calculado automaticamente e atualizado a cada segundo; ao chamar o cliente, o tempo de espera é congelado. A ordem base é de chegada, permitindo acomodar um grupo menor quando surgir capacidade compatível sem remover os demais.
+Registra nome, WhatsApp, quantidade de pessoas, horário de entrada, posição e situação. O tempo decorrido é calculado automaticamente e atualizado a cada segundo; ao chamar o cliente, o tempo de espera é congelado. A mensagem de chamada informa que a mesa ficará disponível por 3 minutos. A ordem base é de chegada, permitindo acomodar um grupo menor quando surgir capacidade compatível sem remover os demais.
 
 ## Automação de WhatsApp
 
-Criações e mudanças relevantes geram eventos na coleção `whatsappQueue`. O robô local acompanha os eventos com situação `pending`, escolhe a mensagem pelo `eventType`, envia pelo WhatsApp e registra o resultado como `sent` ou `failed`, incluindo data de processamento e eventual erro.
+Criações e mudanças relevantes geram eventos na coleção `whatsappQueue`. O robô local acompanha os eventos com situação `pending`, assume cada mensagem antes de enviar para evitar duplicidade, escolhe o texto pelo `eventType` e registra o resultado como `sent`, `failed` ou `ignored`, incluindo data de processamento e eventual erro. Na primeira execução, mensagens antigas ficam bloqueadas por padrão para evitar contatos indevidos.

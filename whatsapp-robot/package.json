@@ -1,0 +1,22 @@
+{
+  "name": "top-haus-reservas-whatsapp-robot",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Robô local de mensagens do sistema de reservas Top Haus",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "check": "node --check index.js && node --check messages.js",
+    "test": "node --test messages.test.js",
+    "test:firebase": "node test-firebase.js"
+  },
+  "dependencies": {
+    "dotenv": "17.4.2",
+    "firebase-admin": "13.10.0",
+    "qrcode-terminal": "0.12.0",
+    "whatsapp-web.js": "1.34.7"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
