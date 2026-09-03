@@ -14,6 +14,8 @@ Este programa fica aberto no computador do restaurante e acompanha a coleção `
 
 Depois da autenticação, a sessão fica salva somente nesse computador. Nas próximas inicializações, normalmente não será necessário escanear novamente.
 
+No Windows, mantenha aberta a janela do WhatsApp Web iniciada pelo robô. O modo invisível pode ficar preso em 100% sem concluir o estado de pronto.
+
 ## Recuperação de mensagens
 
 O robô consulta o Firestore por REST a cada 2 segundos, evitando depender de conexões contínuas que algumas redes bloqueiam. Por padrão, ele recupera mensagens pendentes criadas nas últimas 24 horas. Pendências mais antigas são marcadas como `ignored`, evitando o envio tardio de testes antigos.

@@ -53,8 +53,14 @@ const client = new Client({
     dataPath: path.join(__dirname, '.wwebjs_auth'),
   }),
   puppeteer: {
-    headless: true,
-    args: ['--no-sandbox', '--disable-setuid-sandbox'],
+    // WhatsApp Web pode ficar preso em 100% no modo invisivel no Windows.
+    headless: false,
+    args: [
+      '--disable-gpu',
+      '--disable-dev-shm-usage',
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+    ],
   },
 });
 
