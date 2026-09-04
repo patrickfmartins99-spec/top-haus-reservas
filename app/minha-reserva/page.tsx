@@ -4,6 +4,8 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { ArrowLeft, CalendarDays, CheckCircle2, Clock3, LoaderCircle, MessageCircle, Pencil, Save, Search, Trash2, Users } from 'lucide-react';
 
+import { CustomerNotifications } from '@/components/customer-notifications';
+import { rememberReservation } from '@/lib/customer-notifications-client';
 import { BrandLogo } from '@/components/brand-logo';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -36,6 +38,16 @@ export default function MinhaReservaPage() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [cancelOpen, setCancelOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  async function removeReservation() {
+    setLoading(true); setError('');
+    try {
+      const response = await fetch('/api/minha-reserva', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code: reservation?.id, whatsapp }) });
+      const data = await response.json(); if (!response.ok) throw new Error(data.error);
+      setReservation(null); setDeleteOpen(false); setSuccess('Reserva excluída. Os lugares foram liberados e a ação ficou registrada.');
+      window.dispatchEvent(new Event('tophaus-reservation-change'));
+    } catch (error) { setError(error instanceof Error ? error.message : 'Não foi possível excluir.'); } finally { setLoading(false); }
+  }
 
   useEffect(() => {
     const queryCode = new URLSearchParams(window.location.search).get('codigo');
@@ -51,6 +63,8 @@ export default function MinhaReservaPage() {
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? 'Não foi possível concluir a solicitação.');
       setReservation(data.reservation);
+      if (data.notificationToken) rememberReservation(data.reservation.id, data.notificationToken);
+      else window.dispatchEvent(new Event('tophaus-reservation-change'));
       return data.reservation as Reservation;
     } catch (caughtError) {
       setError(caughtError instanceof Error ? caughtError.message : 'Não foi possível concluir a solicitação.');
@@ -84,7 +98,7 @@ export default function MinhaReservaPage() {
 
   return (
     <main className="min-h-screen bg-[#efede8] text-haus-ink">
-      <header className="border-b border-white/10 bg-black text-white"><div className="mx-auto flex h-20 max-w-6xl items-center justify-between px-5 sm:px-8"><Link href="/" aria-label="Top Haus — página inicial"><BrandLogo compact priority className="rounded-md" /></Link><Link href="/" className="flex items-center gap-2 text-sm font-medium text-white/90 transition hover:text-white"><ArrowLeft className="size-4" /> Voltar para reservas</Link></div></header>
+      <header className="border-b border-white/10 bg-black text-white"><div className="mx-auto flex h-20 max-w-6xl items-center justify-between px-5 sm:px-8"><Link href="/" aria-label="Top Haus — página inicial"><BrandLogo compact priority className="rounded-md" /></Link><CustomerNotifications /><Link href="/" className="flex items-center gap-2 text-sm font-medium text-white/90 transition hover:text-white"><ArrowLeft className="size-4" /> Voltar para reservas</Link></div></header>
       <section className="mx-auto grid max-w-6xl gap-8 px-5 py-10 sm:px-8 lg:grid-cols-[0.78fr_1.22fr] lg:py-16">
         <div className="max-w-md pt-3"><p className="text-xs font-bold uppercase tracking-[0.18em] text-haus-terracotta">Área do cliente</p><h1 className="mt-3 text-4xl font-extrabold tracking-[-0.035em]">Acompanhe sua reserva.</h1><p className="mt-4 leading-7 text-black/65">Consulte os dados reais, confirme a presença, altere ou cancele dentro do prazo.</p><div className="mt-8 space-y-4 text-sm text-black/65"><p className="flex items-center gap-3"><span className="grid size-9 place-items-center rounded-full bg-white"><MessageCircle className="size-4 text-haus-terracotta" /></span> Use o mesmo WhatsApp informado na reserva.</p><p className="flex items-center gap-3"><span className="grid size-9 place-items-center rounded-full bg-white"><Clock3 className="size-4 text-haus-terracotta" /></span> Fora do prazo, a equipe atende pelo WhatsApp.</p></div></div>
         <Card className="border-0 bg-[#fdfcf9] py-0 shadow-[0_24px_70px_rgba(0,0,0,0.12)] ring-black/5"><CardContent className="p-6 sm:p-8">
@@ -96,12 +110,14 @@ export default function MinhaReservaPage() {
             <div className="rounded-2xl border border-haus-gold/40 bg-[#f4e7d7] p-4 text-sm leading-6 text-black/75">A mesa será mantida por {reservation.lateToleranceMinutes} minutos após o horário de chegada. Crianças e bebês devem estar incluídos na quantidade.</div>
             {reservation.status === 'confirmed' ? <Button type="button" disabled={loading} onClick={confirmPresence} className="h-12 w-full bg-black text-base font-bold text-white hover:bg-black/85"><CheckCircle2 /> Confirmar presença</Button> : null}
             <div className="grid gap-3 sm:grid-cols-2"><Button type="button" variant="outline" className="h-11" onClick={() => { setReservation(null); setSuccess(''); setError(''); }}>Consultar outra reserva</Button>{reservation.canModify ? <Button type="button" variant="outline" className="h-11" onClick={() => setDraft({ ...reservation })}><Pencil /> Alterar reserva</Button> : supportUrl ? <a href={supportUrl} target="_blank" rel="noreferrer" className={buttonVariants({ variant: 'outline', className: 'h-11 border-haus-terracotta/30 text-haus-terracotta' })}><MessageCircle /> Falar no WhatsApp</a> : <Button type="button" disabled variant="outline" className="h-11">Prazo de alteração encerrado</Button>}</div>
+            {(reservation.canModify || (reservation.status === 'cancelled' && new Date(reservation.modifyDeadline).getTime() >= Date.now())) && <Button type="button" variant="outline" className="w-full border-red-700 text-red-700" onClick={() => setDeleteOpen(true)}><Trash2 /> Excluir reserva do sistema</Button>}
             {reservation.canModify && !['cancelled', 'completed', 'no_show', 'seated'].includes(reservation.status) ? <Button type="button" variant="destructive" className="w-full" onClick={() => setCancelOpen(true)}><Trash2 /> Cancelar reserva</Button> : null}
           </div>}
         </CardContent></Card>
       </section>
 
       <Dialog open={draft !== null} onOpenChange={(open) => { if (!open) setDraft(null); }}><DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-2xl">{draft ? <form onSubmit={saveReservation}><DialogHeader><DialogTitle>Alterar reserva</DialogTitle><DialogDescription>As alterações ficam registradas e podem exigir nova aprovação.</DialogDescription></DialogHeader><div className="grid gap-4 py-5 sm:grid-cols-2"><div className="space-y-2"><Label htmlFor="client-name">Nome</Label><Input id="client-name" value={draft.customerName} onChange={(event) => setDraft({ ...draft, customerName: event.target.value })} required /></div><div className="space-y-2"><Label htmlFor="client-party">Pessoas</Label><Input id="client-party" type="number" min={1} value={draft.partySize} onChange={(event) => setDraft({ ...draft, partySize: Number(event.target.value) })} required /></div><div className="space-y-2"><Label htmlFor="client-date">Data</Label><Input id="client-date" type="date" value={draft.serviceDate} onChange={(event) => setDraft({ ...draft, serviceDate: event.target.value })} required /></div><div className="space-y-2"><Label htmlFor="client-service">Serviço</Label><NativeSelect id="client-service" value={draft.service} onChange={(event) => { const service = event.target.value; setDraft({ ...draft, service, arrivalTime: times[service][0] }); }} className="w-full"><NativeSelectOption value="almoco">Almoço</NativeSelectOption><NativeSelectOption value="rodizio">Rodízio</NativeSelectOption></NativeSelect></div><div className="space-y-2"><Label htmlFor="client-time">Horário</Label><NativeSelect id="client-time" value={draft.arrivalTime} onChange={(event) => setDraft({ ...draft, arrivalTime: event.target.value })} className="w-full">{times[draft.service].map((time) => <NativeSelectOption key={time} value={time}>{time}</NativeSelectOption>)}</NativeSelect></div><div className="space-y-2 sm:col-span-2"><Label htmlFor="client-notes">Observações</Label><Textarea id="client-notes" value={draft.notes} onChange={(event) => setDraft({ ...draft, notes: event.target.value })} maxLength={1000} /></div></div><DialogFooter><Button type="button" variant="outline" onClick={() => setDraft(null)}>Voltar</Button><Button type="submit" disabled={loading} className="bg-black text-white hover:bg-black/85">{loading ? <LoaderCircle className="animate-spin" /> : <Save />} Salvar alterações</Button></DialogFooter></form> : null}</DialogContent></Dialog>
+      <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}><DialogContent><DialogHeader><DialogTitle>Excluir esta reserva?</DialogTitle><DialogDescription>Ela sairá das listas e os lugares serão liberados. O histórico de auditoria será preservado. Esta ação não pode ser desfeita pelo site.</DialogDescription></DialogHeader>{error && <p role="alert" className="text-red-700">{error}</p>}<DialogFooter><Button variant="outline" onClick={() => setDeleteOpen(false)}>Voltar</Button><Button variant="destructive" disabled={loading} onClick={removeReservation}>Confirmar exclusão</Button></DialogFooter></DialogContent></Dialog>
       <Dialog open={cancelOpen} onOpenChange={setCancelOpen}><DialogContent><DialogHeader><DialogTitle>Cancelar esta reserva?</DialogTitle><DialogDescription>Os lugares serão liberados imediatamente. Esta ação ficará registrada.</DialogDescription></DialogHeader><DialogFooter><Button variant="outline" onClick={() => setCancelOpen(false)}>Manter reserva</Button><Button variant="destructive" disabled={loading} onClick={cancelReservation}>{loading ? <LoaderCircle className="animate-spin" /> : <Trash2 />} Cancelar reserva</Button></DialogFooter></DialogContent></Dialog>
     </main>
   );

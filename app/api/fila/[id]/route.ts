@@ -1,9 +1,10 @@
 import { FieldValue } from 'firebase-admin/firestore';
-import { NextResponse } from 'next/server';
+import { after, NextResponse } from 'next/server';
 
 import { requireStaff } from '@/lib/auth/staff-request';
 import { WAITLIST_CALL_HOLD_MINUTES } from '@/lib/domain/waitlist-time';
 import { getAdminDatabase } from '@/lib/firebase/admin';
+import { enqueueStaffNotification, dispatchStaffNotifications } from '@/lib/firebase/staff-push';
 import { createWhatsAppOutboxEvent } from '@/lib/firebase/whatsapp-outbox';
 
 const allowedStatuses = ['waiting', 'called', 'seated', 'removed'];
@@ -77,9 +78,12 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     } : {}),
     createdAt: FieldValue.serverTimestamp(),
   });
-  if (status === 'called' || !status) {
-    batch.set(database.collection('whatsappQueue').doc(), createWhatsAppOutboxEvent({
-      eventType: status === 'called' ? 'waitlist_called' : 'waitlist_updated',
+  if ((status && status !== previousStatus) || !status) {
+    const eventType = status === 'called' ? 'waitlist_called' : status === 'removed' ? 'waitlist_removed' : status === 'seated' ? 'waitlist_seated' : 'waitlist_updated';
+    const eventRef = database.collection('whatsappQueue').doc();
+    enqueueStaffNotification(database, batch, eventRef.id, eventType, id, 'waitlist');
+    batch.set(eventRef, createWhatsAppOutboxEvent({
+      eventType,
       entityType: 'waitlist',
       entityId: id,
       whatsapp: nextWhatsapp,
@@ -93,6 +97,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     }));
   }
   await batch.commit();
+  after(() => dispatchStaffNotifications(database));
 
   return NextResponse.json({ ok: true });
 }

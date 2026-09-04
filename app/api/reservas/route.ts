@@ -1,17 +1,18 @@
 import { createHash, randomBytes } from 'node:crypto';
 
 import { FieldValue } from 'firebase-admin/firestore';
-import { NextResponse } from 'next/server';
+import { after, NextResponse } from 'next/server';
 
 import {
   isMonday,
   isReservationInput,
   reservationInstant,
+  canBook,
 } from '@/lib/domain/reservations';
 import { requireStaff } from '@/lib/auth/staff-request';
 import { getOperationalSettings } from '@/lib/domain/operational-settings';
 import { getAdminDatabase } from '@/lib/firebase/admin';
-import { createWhatsAppOutboxEvent } from '@/lib/firebase/whatsapp-outbox';
+import { enqueueReservationEvent, dispatchReservationPush } from '@/lib/firebase/reservation-notifications';
 
 function serializeTimestamp(value: unknown) {
   if (value && typeof value === 'object' && 'toDate' in value && typeof value.toDate === 'function') {
@@ -28,7 +29,7 @@ export async function GET(request: Request) {
   if (!database) return NextResponse.json({ error: 'Firebase não configurado.' }, { status: 503 });
 
   const snapshot = await database.collection('reservations').orderBy('createdAt', 'desc').limit(300).get();
-  const reservations = snapshot.docs.map((document) => {
+  const reservations = snapshot.docs.filter((document) => !document.data().deletedAt).map((document) => {
     const data = document.data();
     return {
       id: document.id,
@@ -39,6 +40,7 @@ export async function GET(request: Request) {
       serviceDate: String(data.serviceDate ?? ''),
       arrivalTime: String(data.arrivalTime ?? ''),
       notes: String(data.notes ?? ''),
+      tableLabel: String(data.tableLabel ?? ''),
       status: String(data.status ?? 'confirmed'),
       source: String(data.source ?? 'customer_web'),
       createdAt: serializeTimestamp(data.createdAt),
@@ -65,8 +67,8 @@ export async function POST(request: Request) {
 
   const settings = await getOperationalSettings(database);
   const instant = reservationInstant(payload);
-  if (instant.getTime() - Date.now() < settings.minAdvanceHours * 60 * 60 * 1000) {
-    return NextResponse.json({ error: `A reserva precisa ser feita com ${settings.minAdvanceHours} horas de antecedência.` }, { status: 400 });
+  if (!canBook(payload, settings.minAdvanceHours)) {
+    return NextResponse.json({ error: payload.service === 'rodizio' ? 'As reservas para o rodízio encerram às 18h do dia da visita (horário de Brasília).' : `A reserva do almoço precisa ser feita com ${settings.minAdvanceHours} horas de antecedência.` }, { status: 400 });
   }
   const latest = new Date();
   latest.setMonth(latest.getMonth() + settings.maxBookingMonths);
@@ -86,7 +88,6 @@ export async function POST(request: Request) {
   const specialDateRef = database.collection('specialDates').doc(serviceKey);
   const reservationRef = database.collection('reservations').doc();
   const auditRef = database.collection('auditLogs').doc();
-  const whatsappEventRef = database.collection('whatsappQueue').doc();
 
   try {
     await database.runTransaction(async (transaction) => {
@@ -114,7 +115,10 @@ export async function POST(request: Request) {
       }, { merge: true });
 
       transaction.set(reservationRef, {
-        ...payload,
+        service: payload.service,
+        serviceDate: payload.serviceDate,
+        arrivalTime: payload.arrivalTime,
+        partySize: payload.partySize,
         customerName: payload.customerName.trim(),
         whatsapp: payload.whatsapp.replace(/\D/g, ''),
         notes: payload.notes?.trim().slice(0, 1000) ?? '',
@@ -135,7 +139,7 @@ export async function POST(request: Request) {
         toStatus: status,
         createdAt: FieldValue.serverTimestamp(),
       });
-      transaction.set(whatsappEventRef, createWhatsAppOutboxEvent({
+      enqueueReservationEvent(database, transaction, {
         eventType: status === 'confirmed' ? 'reservation_confirmed' : 'reservation_pending_approval',
         entityType: 'reservation',
         entityId: reservationRef.id,
@@ -148,8 +152,9 @@ export async function POST(request: Request) {
           partySize: payload.partySize,
           reservationCode: reservationRef.id,
           status,
+          lateToleranceMinutes: settings.lateToleranceMinutes,
         },
-      }));
+      });
     });
   } catch (error) {
     if (error instanceof Error && error.message === 'CLOSED_DATE') {
@@ -161,5 +166,6 @@ export async function POST(request: Request) {
     throw error;
   }
 
+  after(() => dispatchReservationPush(database, reservationRef.id));
   return NextResponse.json({ id: reservationRef.id, token, status }, { status: 201 });
 }

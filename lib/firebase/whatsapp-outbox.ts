@@ -10,13 +10,15 @@ export type WhatsAppEventType =
   | 'reservation_cancelled'
   | 'reservation_presence_confirmed'
   | 'reservation_no_show'
+  | 'reservation_seated'
+  | 'reservation_completed'
   | 'waitlist_created'
   | 'waitlist_updated'
   | 'waitlist_called'
   | 'waitlist_seated'
   | 'waitlist_removed';
 
-type WhatsAppOutboxInput = {
+export type WhatsAppOutboxInput = {
   eventType: WhatsAppEventType;
   entityType: 'reservation' | 'waitlist';
   entityId: string;
@@ -34,7 +36,7 @@ export function createWhatsAppOutboxEvent(input: WhatsAppOutboxInput) {
     entityId: input.entityId,
     recipientWhatsapp: input.whatsapp.replace(/\D/g, ''),
     payload: input.payload,
-    status: 'pending',
+    status: 'manual_pending',
     attempts: 0,
     createdAt: FieldValue.serverTimestamp(),
     updatedAt: FieldValue.serverTimestamp(),

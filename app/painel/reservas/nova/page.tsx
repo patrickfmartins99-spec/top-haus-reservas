@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { LoaderCircle, Save, ArrowLeft } from 'lucide-react';
@@ -11,6 +11,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
 import { Textarea } from '@/components/ui/textarea';
+import { minimumBookingDate, brazilDate } from '@/lib/domain/reservations';
+import { DEFAULT_OPERATIONAL_SETTINGS } from '@/lib/domain/operational-settings';
 import { getFirebaseClient } from '@/lib/firebase/client';
 
 type Service = 'almoco' | 'rodizio';
@@ -19,13 +21,6 @@ const times: Record<Service, string[]> = {
   almoco: ['11:00', '11:15', '11:30'],
   rodizio: ['18:30', '18:45', '19:00'],
 };
-
-function toDateInput(date: Date) {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-}
 
 export default function NewReservationPage() {
   const router = useRouter();
@@ -39,11 +34,14 @@ export default function NewReservationPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
+  const [settings, setSettings] = useState(DEFAULT_OPERATIONAL_SETTINGS);
+  useEffect(() => { fetch('/api/configuracoes/publicas').then(async (r) => { if (r.ok) setSettings((await r.json()).settings); }).catch(() => undefined); }, []);
+
   const { minDate, maxDate } = useMemo(() => {
-    const minimum = new Date(); minimum.setDate(minimum.getDate() + 1);
-    const maximum = new Date(); maximum.setFullYear(maximum.getFullYear() + 1);
-    return { minDate: toDateInput(minimum), maxDate: toDateInput(maximum) };
-  }, []);
+    const minimum = minimumBookingDate(service, settings.minAdvanceHours);
+    const maximum = new Date(); maximum.setMonth(maximum.getMonth() + settings.maxBookingMonths);
+    return { minDate: minimum, maxDate: brazilDate(maximum) };
+  }, [service, settings]);
 
   function changeService(nextService: Service) {
     setService(nextService);
@@ -76,6 +74,7 @@ export default function NewReservationPage() {
     <div className="mx-auto max-w-4xl space-y-6 p-5 sm:p-8">
       <div className="flex items-center gap-4"><Link href="/painel/reservas" aria-label="Voltar para reservas" className={buttonVariants({ variant: 'outline', size: 'icon' })}><ArrowLeft /></Link><div><p className="text-xs font-bold uppercase tracking-[0.16em] text-haus-terracotta">Reservas</p><h1 className="mt-1 text-3xl font-extrabold tracking-[-0.03em]">Nova reserva</h1></div></div>
       {error ? <p className="rounded-xl bg-destructive/10 px-4 py-3 text-sm font-medium text-destructive" role="alert">{error}</p> : null}
+      <p className="rounded-xl bg-white p-4 text-sm font-semibold">Rodízio: reservas até as 18h do dia da visita. Almoço: {settings.minAdvanceHours} horas de antecedência. Horário de Brasília.</p>
       <form onSubmit={createReservation}>
         <Card className="bg-white ring-black/7"><CardHeader className="border-b border-black/7"><CardTitle>Dados do cliente</CardTitle><p className="text-sm text-black/50">A reserva será salva no Firebase e ficará disponível para toda a equipe.</p></CardHeader><CardContent className="grid gap-5 sm:grid-cols-2">
           <div className="space-y-2"><Label htmlFor="customer-name">Nome completo</Label><Input id="customer-name" value={customerName} onChange={(event) => setCustomerName(event.target.value)} required minLength={2} placeholder="Nome do responsável" /></div>

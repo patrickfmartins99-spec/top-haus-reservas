@@ -19,6 +19,7 @@ type AuditEvent = {
   fromStatus: string | null;
   toStatus: string | null;
   createdAt: string | null;
+  tableChange: string | null;
 };
 
 const actionLabels: Record<string, string> = {
@@ -27,6 +28,10 @@ const actionLabels: Record<string, string> = {
   reservation_updated_by_customer: 'Alterou a própria reserva',
   reservation_presence_confirmed: 'Confirmou presença',
   reservation_cancelled: 'Cancelou uma reserva',
+  reservation_deleted: 'Excluiu uma reserva (histórico preservado)',
+  reservation_table_assigned: 'Definiu ou alterou a mesa',
+  whatsapp_manual_sent: 'Registrou envio manual pelo WhatsApp',
+  whatsapp_discarded: 'Descartou uma mensagem pendente',
   waitlist_created: 'Adicionou cliente à fila',
   waitlist_updated: 'Alterou cliente da fila',
   waitlist_status_changed: 'Alterou situação da fila',
@@ -46,6 +51,7 @@ const statusLabels: Record<string, string> = {
   cancelled: 'cancelada',
   no_show: 'não compareceu',
   completed: 'concluída',
+  deleted: 'excluída',
 };
 
 function formatDateTime(value: string | null) {
@@ -62,7 +68,7 @@ function eventDetail(event: AuditEvent) {
   const statusChange = event.fromStatus && event.toStatus && event.fromStatus !== event.toStatus
     ? ` · ${statusLabels[event.fromStatus] ?? event.fromStatus} → ${statusLabels[event.toStatus] ?? event.toStatus}`
     : '';
-  return `${code ?? 'Registro'}${statusChange}`;
+  return `${code ?? 'Registro'}${statusChange}${event.tableChange ? ` · Mesa: ${event.tableChange}` : ''}`;
 }
 
 export default function AuditPage() {

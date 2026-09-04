@@ -1,8 +1,9 @@
 import { FieldValue } from 'firebase-admin/firestore';
-import { NextResponse } from 'next/server';
+import { after, NextResponse } from 'next/server';
 
 import { requireStaff } from '@/lib/auth/staff-request';
 import { getAdminDatabase } from '@/lib/firebase/admin';
+import { enqueueStaffNotification, dispatchStaffNotifications } from '@/lib/firebase/staff-push';
 import { createWhatsAppOutboxEvent } from '@/lib/firebase/whatsapp-outbox';
 
 function serializeTimestamp(value: unknown) {
@@ -82,7 +83,9 @@ export async function POST(request: Request) {
     whatsapp,
     payload: { customerName, partySize },
   }));
+  enqueueStaffNotification(database, batch, whatsappEventRef.id, 'waitlist_created', entryRef.id, 'waitlist');
   await batch.commit();
+  after(() => dispatchStaffNotifications(database));
 
   return NextResponse.json({ id: entryRef.id }, { status: 201 });
 }

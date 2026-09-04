@@ -45,6 +45,7 @@ export async function GET(request: Request) {
       waitlistId: typeof data.waitlistId === 'string' ? data.waitlistId : null,
       fromStatus: typeof data.fromStatus === 'string' ? data.fromStatus : null,
       toStatus: typeof data.toStatus === 'string' ? data.toStatus : null,
+      tableChange: data.action === 'reservation_table_assigned' ? `${String(data.changes?.before?.tableLabel || 'não definida')} → ${String(data.changes?.after?.tableLabel || 'não definida')}` : null,
       createdAt: serializeTimestamp(data.createdAt),
     };
   });

@@ -1,5 +1,5 @@
 import { FieldValue } from 'firebase-admin/firestore';
-import { NextResponse } from 'next/server';
+import { after, NextResponse } from 'next/server';
 
 import { requireStaff } from '@/lib/auth/staff-request';
 import {
@@ -10,7 +10,9 @@ import {
 } from '@/lib/domain/reservations';
 import { getOperationalSettings } from '@/lib/domain/operational-settings';
 import { getAdminDatabase } from '@/lib/firebase/admin';
-import { createWhatsAppOutboxEvent, type WhatsAppEventType } from '@/lib/firebase/whatsapp-outbox';
+import { type WhatsAppEventType } from '@/lib/firebase/whatsapp-outbox';
+import { enqueueReservationEvent, dispatchReservationPush } from '@/lib/firebase/reservation-notifications';
+import { deleteReservation } from '@/lib/firebase/delete-reservation';
 
 const allowedStatuses: ReservationStatus[] = [
   'pending_approval',
@@ -34,6 +36,28 @@ export async function PATCH(request: Request, { params }: RouteContext<'/api/res
   if (!context) return NextResponse.json({ error: 'Acesso restrito à equipe.' }, { status: 403 });
 
   const payload = await request.json().catch(() => null) as Record<string, unknown> | null;
+  if (payload?.action === 'assign_table') {
+    if (typeof payload.tableLabel !== 'string' || payload.tableLabel.trim().length > 40) return NextResponse.json({ error: 'Informe uma mesa com até 40 caracteres.' }, { status: 400 });
+    const db = getAdminDatabase();
+    if (!db) return NextResponse.json({ error: 'Sistema indisponível.' }, { status: 503 });
+    const { id } = await params;
+    const ref = db.collection('reservations').doc(id);
+    try {
+      await db.runTransaction(async (tx) => {
+        const current = await tx.get(ref);
+        if (!current.exists || current.data()?.deletedAt) throw new Error('NOT_FOUND');
+        const tableLabel = (payload.tableLabel as string).trim();
+        const before = String(current.data()?.tableLabel ?? '');
+        if (before === tableLabel) return;
+        tx.update(ref, { tableLabel, updatedAt: FieldValue.serverTimestamp(), updatedBy: context.decodedToken.uid });
+        tx.set(db.collection('auditLogs').doc(), { reservationId: id, actorType: 'staff', actorId: context.decodedToken.uid, action: 'reservation_table_assigned', changes: { before: { tableLabel: before }, after: { tableLabel } }, createdAt: FieldValue.serverTimestamp() });
+      });
+    } catch (error) {
+      if (error instanceof Error && error.message === 'NOT_FOUND') return NextResponse.json({ error: 'Reserva não encontrada.' }, { status: 404 });
+      throw error;
+    }
+    return NextResponse.json({ ok: true, tableLabel: payload.tableLabel.trim() });
+  }
   if (!payload || !isReservationInput(payload)) {
     return NextResponse.json({ error: 'Revise os dados informados para a reserva.' }, { status: 400 });
   }
@@ -62,7 +86,7 @@ export async function PATCH(request: Request, { params }: RouteContext<'/api/res
   try {
     await database.runTransaction(async (transaction) => {
       const reservationSnapshot = await transaction.get(reservationRef);
-      if (!reservationSnapshot.exists) throw new Error('NOT_FOUND');
+      if (!reservationSnapshot.exists || reservationSnapshot.data()?.deletedAt) throw new Error('NOT_FOUND');
 
       const previous = reservationSnapshot.data() ?? {};
       const previousStatus = String(previous.status ?? 'confirmed') as ReservationStatus;
@@ -169,11 +193,15 @@ export async function PATCH(request: Request, { params }: RouteContext<'/api/res
         ? 'reservation_approved'
         : status === 'cancelled' && previousStatus !== 'cancelled'
           ? 'reservation_cancelled'
-          : status !== 'cancelled' && reservationDetailsChanged
+          : status === 'no_show' && previousStatus !== status ? 'reservation_no_show'
+          : status === 'presence_confirmed' && previousStatus !== status ? 'reservation_presence_confirmed'
+          : status === 'seated' && previousStatus !== status ? 'reservation_seated'
+          : status === 'completed' && previousStatus !== status ? 'reservation_completed'
+          : status !== 'cancelled' && (reservationDetailsChanged || previousStatus !== status)
             ? 'reservation_updated'
             : null;
       if (eventType) {
-        transaction.set(database.collection('whatsappQueue').doc(), createWhatsAppOutboxEvent({
+        enqueueReservationEvent(database, transaction, {
           eventType,
           entityType: 'reservation',
           entityId: id,
@@ -187,6 +215,7 @@ export async function PATCH(request: Request, { params }: RouteContext<'/api/res
             partySize: updatedReservation.partySize,
             notes: updatedReservation.notes,
             reservationCode: id,
+            lateToleranceMinutes: settings.lateToleranceMinutes,
             fromStatus: previousStatus,
             toStatus: status,
             previous: {
@@ -199,7 +228,7 @@ export async function PATCH(request: Request, { params }: RouteContext<'/api/res
               notes: String(previous.notes ?? ''),
             },
           },
-        }));
+        });
       }
     });
   } catch (error) {
@@ -215,5 +244,21 @@ export async function PATCH(request: Request, { params }: RouteContext<'/api/res
     throw error;
   }
 
+  after(() => dispatchReservationPush(database, id));
+  return NextResponse.json({ ok: true });
+}
+
+export async function DELETE(request: Request, { params }: RouteContext<'/api/reservas/[id]'>) {
+  const context = await requireStaff(request);
+  if (!context) return NextResponse.json({ error: 'Acesso restrito à equipe.' }, { status: 403 });
+  const db = getAdminDatabase();
+  if (!db) return NextResponse.json({ error: 'Sistema indisponível.' }, { status: 503 });
+  const { id } = await params;
+  try { await deleteReservation(db, id, { type: 'staff', id: context.decodedToken.uid }); }
+  catch (error) {
+    if (error instanceof Error && error.message === 'NOT_FOUND') return NextResponse.json({ error: 'Reserva não encontrada.' }, { status: 404 });
+    throw error;
+  }
+  after(() => dispatchReservationPush(db, id));
   return NextResponse.json({ ok: true });
 }

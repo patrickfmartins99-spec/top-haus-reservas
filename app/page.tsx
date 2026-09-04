@@ -16,6 +16,9 @@ import {
   Users,
 } from 'lucide-react';
 
+import { CustomerNotifications } from '@/components/customer-notifications';
+import { rememberReservation } from '@/lib/customer-notifications-client';
+import { minimumBookingDate, brazilDate, canBook } from '@/lib/domain/reservations';
 import { BrandLogo } from '@/components/brand-logo';
 import { Button } from '@/components/ui/button';
 import {
@@ -51,13 +54,6 @@ const services: Record<
   },
 };
 
-function toDateInput(date: Date) {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-}
-
 export default function Home() {
   const [service, setService] = useState<Service>('rodizio');
   const [date, setDate] = useState('');
@@ -79,12 +75,11 @@ export default function Home() {
   }, []);
 
   const { minDate, maxDate } = useMemo(() => {
-    const minimum = new Date();
-    minimum.setHours(minimum.getHours() + settings.minAdvanceHours);
+    const minimum = minimumBookingDate(service, settings.minAdvanceHours);
     const maximum = new Date();
     maximum.setMonth(maximum.getMonth() + settings.maxBookingMonths);
-    return { minDate: toDateInput(minimum), maxDate: toDateInput(maximum) };
-  }, [settings.maxBookingMonths, settings.minAdvanceHours]);
+    return { minDate: minimum, maxDate: brazilDate(maximum) };
+  }, [service, settings.maxBookingMonths, settings.minAdvanceHours]);
 
   const mondaySelected = useMemo(() => {
     if (!date) return false;
@@ -100,6 +95,7 @@ export default function Home() {
   async function checkAvailability(event: React.SyntheticEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!date) return;
+    if (!canBook({ service, serviceDate: date, arrivalTime: time }, settings.minAdvanceHours)) { setError(service === 'rodizio' ? 'As reservas para hoje encerram às 18h (horário de Brasília).' : `O almoço exige ${settings.minAdvanceHours} horas de antecedência.`); return; }
     if (!checked) {
       setChecked(true);
       return;
@@ -124,6 +120,7 @@ export default function Home() {
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? 'Não foi possível concluir a reserva.');
       setResult(data);
+      rememberReservation(data.id, data.token);
     } catch (caughtError) {
       setError(caughtError instanceof Error ? caughtError.message : 'Não foi possível concluir a reserva.');
     } finally {
@@ -142,13 +139,13 @@ export default function Home() {
               <span className="block text-[10px] uppercase tracking-[0.18em] text-white/75">Cliente</span>
             </span>
           </a>
-          <Link
+          <div className="flex items-center gap-2"><CustomerNotifications /><Link
             href="/minha-reserva"
             className="flex items-center gap-2 rounded-full border border-white/15 px-4 py-2 text-sm font-medium text-white/85 transition hover:border-haus-gold/60 hover:text-white"
           >
             Consultar reserva
             <ChevronRight className="size-4" />
-          </Link>
+          </Link></div>
         </div>
       </header>
 
@@ -202,6 +199,7 @@ export default function Home() {
                       ? 'Guarde o código abaixo. Com ele e seu WhatsApp, você pode consultar ou alterar a reserva.'
                       : 'A equipe do Top Haus analisará o grupo. Guarde o código para acompanhar a solicitação.'}
                   </p>
+                  <p className="mt-3 text-sm font-semibold text-black/80">Acompanhe as atualizações pelo sino de notificações do site.</p>
                   <p className="mt-5 break-all rounded-xl bg-black px-4 py-3 font-mono text-sm font-bold text-white">Código {result.id}</p>
                   <div className="mt-6 flex flex-wrap justify-center gap-3"><Link href={`/minha-reserva?codigo=${encodeURIComponent(result.id)}`} className="inline-flex h-8 items-center justify-center rounded-lg border border-black/15 px-3 text-sm font-semibold hover:bg-black/5">Consultar esta reserva</Link><Button type="button" variant="outline" onClick={() => { setResult(null); setChecked(false); }}>Fazer outra reserva</Button></div>
                 </output>
@@ -273,13 +271,13 @@ export default function Home() {
                       </button>
                     ))}
                   </div>
-                  <p className="mt-2 text-xs text-haus-ink/60">Reservas para {services[service].label.toLowerCase()} são aceitas até {service === 'almoco' ? settings.lunchArrivalLimit : settings.dinnerArrivalLimit}. Há {settings.lateToleranceMinutes} minutos de tolerância.</p>
+                  <p className="mt-2 text-xs text-haus-ink/60">Chegada para {services[service].label.toLowerCase()} até {service === 'almoco' ? settings.lunchArrivalLimit : settings.dinnerArrivalLimit}. Há {settings.lateToleranceMinutes} minutos de tolerância.</p>
                 </fieldset>
 
                 {checked && (
                   <div className="space-y-5">
                     <output className="block rounded-xl border border-haus-sage/25 bg-haus-sage/[0.07] p-4">
-                      <p className="flex items-center gap-2 font-semibold text-haus-sage"><ShieldCheck className="size-5" /> Horário disponível</p>
+                      <p className="flex items-center gap-2 font-semibold text-haus-sage"><ShieldCheck className="size-5" /> Confira seus dados</p>
                       <p className="mt-1 text-sm text-haus-ink/60">
                         {partySize <= settings.autoApprovalLimit
                           ? 'Preencha seus dados para confirmar a reserva automaticamente.'
@@ -308,7 +306,7 @@ export default function Home() {
 
                 <Button type="submit" size="lg" disabled={!date || submitting} className="h-12 w-full rounded-xl bg-haus-terracotta text-base font-bold text-white hover:bg-haus-terracotta/90">
                   {submitting && <LoaderCircle className="size-5 animate-spin" />}
-                  {checked ? (partySize <= settings.autoApprovalLimit ? 'Confirmar reserva' : 'Enviar para aprovação') : 'Ver disponibilidade'}
+                  {checked ? (partySize <= settings.autoApprovalLimit ? 'Confirmar reserva' : 'Enviar para aprovação') : 'Continuar'}
                   {!submitting && <ChevronRight className="size-5" />}
                 </Button>
               </form>
@@ -323,7 +321,7 @@ export default function Home() {
           {[
             { icon: Clock3, title: 'Chegue no horário', text: 'Sua mesa fica reservada por 10 minutos após o horário escolhido.' },
             { icon: MessageCircle, title: 'Atendimento pelo WhatsApp', text: 'Quando necessário, fale com a equipe usando a conversa preparada pelo sistema.' },
-            { icon: CalendarDays, title: 'Planeje com antecedência', text: `Reserve com no mínimo ${settings.minAdvanceHours} horas e até ${settings.maxBookingMonths} meses de antecedência.` },
+            { icon: CalendarDays, title: 'Planeje com antecedência', text: `Rodízio: reserve até as 18h do dia da visita. Almoço: mínimo de ${settings.minAdvanceHours} horas de antecedência. Calendário aberto por ${settings.maxBookingMonths} meses.` },
           ].map(({ icon: Icon, title, text }) => (
             <article key={title} className="flex gap-4 rounded-2xl border border-black/7 bg-white/60 p-5">
               <span className="grid size-10 shrink-0 place-items-center rounded-full bg-haus-terracotta/10 text-haus-terracotta"><Icon className="size-5" /></span>

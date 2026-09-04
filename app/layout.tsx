@@ -10,6 +10,8 @@ export const metadata: Metadata = {
     ? 'Ambiente interno para gestão de reservas do Top Haus.'
     : 'Reserve seu almoço ou rodízio no Top Haus Restaurante.',
   robots: isStaffSurface ? { index: false, follow: false } : undefined,
+  appleWebApp: { capable: true, statusBarStyle: 'black', title: 'Top Haus' },
+  icons: { apple: '/icon' },
   openGraph: {
     title: isStaffSurface ? 'Equipe | Top Haus Reservas' : 'Reservas | Top Haus Restaurante',
     description: isStaffSurface

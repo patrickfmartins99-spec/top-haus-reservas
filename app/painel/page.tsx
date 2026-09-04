@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { onAuthStateChanged } from 'firebase/auth';
 import { CalendarDays, ClipboardList, Clock3, ListOrdered, LoaderCircle, Plus, Users } from 'lucide-react';
 
+import { ReservationTable } from '@/components/reservation-table';
 import { Badge } from '@/components/ui/badge';
 import { buttonVariants } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -20,6 +21,7 @@ type Reservation = {
   serviceDate: string;
   arrivalTime: string;
   status: string;
+  tableLabel: string;
 };
 
 type QueueEntry = {
@@ -124,8 +126,8 @@ export default function DashboardPage() {
           <CardContent>
             {loading ? <p className="flex items-center justify-center gap-2 py-12 text-sm text-black/65"><LoaderCircle className="size-4 animate-spin" /> Carregando dados...</p> : null}
             {!loading && todayReservations.length === 0 ? <p className="py-12 text-center text-sm text-black/65">Nenhuma reserva registrada para hoje.</p> : null}
-            {!loading && todayReservations.length > 0 ? <Table><TableHeader><TableRow><TableHead>Serviço</TableHead><TableHead>Horário</TableHead><TableHead>Cliente</TableHead><TableHead>Pessoas</TableHead><TableHead>Situação</TableHead></TableRow></TableHeader><TableBody>
-              {todayReservations.map((reservation) => <TableRow key={reservation.id}><TableCell>{reservation.service === 'almoco' ? 'Almoço' : 'Rodízio'}</TableCell><TableCell className="font-semibold">{reservation.arrivalTime}</TableCell><TableCell><p className="font-semibold">{reservation.customerName}</p><p className="font-mono text-[11px] font-semibold text-black/65">{reservation.id}</p></TableCell><TableCell>{reservation.partySize}</TableCell><TableCell><Badge className={statusClass(reservation.status)}>{statusLabels[reservation.status] ?? reservation.status}</Badge></TableCell></TableRow>)}
+            {!loading && todayReservations.length > 0 ? <Table><TableHeader><TableRow><TableHead>Serviço</TableHead><TableHead>Horário</TableHead><TableHead>Cliente</TableHead><TableHead>Pessoas</TableHead><TableHead>Mesa</TableHead><TableHead>Situação</TableHead></TableRow></TableHeader><TableBody>
+              {todayReservations.map((reservation) => <TableRow key={reservation.id}><TableCell>{reservation.service === 'almoco' ? 'Almoço' : 'Rodízio'}</TableCell><TableCell className="font-semibold">{reservation.arrivalTime}</TableCell><TableCell><p className="font-semibold">{reservation.customerName}</p><p className="font-mono text-[11px] font-semibold text-black/65">{reservation.id}</p></TableCell><TableCell>{reservation.partySize}</TableCell><TableCell><ReservationTable id={reservation.id} initialValue={reservation.tableLabel} customerName={reservation.customerName} /></TableCell><TableCell><Badge className={statusClass(reservation.status)}>{statusLabels[reservation.status] ?? reservation.status}</Badge></TableCell></TableRow>)}
             </TableBody></Table> : null}
             <Link href="/painel/reservas" className={buttonVariants({ variant: 'outline', className: 'mt-5 w-full' })}><CalendarDays /> Ver todas as reservas</Link>
           </CardContent>

@@ -10,7 +10,7 @@ export async function requireStaff(request: Request) {
   if (!token || !authentication) return null;
 
   try {
-    const decodedToken = await authentication.verifyIdToken(token);
+    const decodedToken = await authentication.verifyIdToken(token, true);
     if (decodedToken.staff !== true) return null;
     return { authentication, decodedToken };
   } catch {

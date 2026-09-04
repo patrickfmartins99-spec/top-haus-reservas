@@ -1,10 +1,11 @@
 import { FieldValue } from 'firebase-admin/firestore';
-import { NextResponse } from 'next/server';
+import { after, NextResponse } from 'next/server';
 
 import { getOperationalSettings } from '@/lib/domain/operational-settings';
-import { isMonday, isReservationInput, reservationInstant, type ReservationStatus } from '@/lib/domain/reservations';
+import { canBook, CANCELLATION_HOURS, isMonday, isReservationInput, reservationInstant, type ReservationStatus } from '@/lib/domain/reservations';
 import { getAdminDatabase } from '@/lib/firebase/admin';
-import { createWhatsAppOutboxEvent } from '@/lib/firebase/whatsapp-outbox';
+import { enqueueReservationEvent, dispatchReservationPush, issueNotificationAccess } from '@/lib/firebase/reservation-notifications';
+import { deleteReservation } from '@/lib/firebase/delete-reservation';
 
 const capacityStatuses = new Set<ReservationStatus>(['pending_approval', 'confirmed', 'presence_confirmed', 'seated']);
 
@@ -43,10 +44,10 @@ async function findReservation(code: unknown, whatsapp: unknown) {
   if (!database) return { error: 'FIREBASE' as const };
   const normalizedCode = typeof code === 'string' ? code.trim() : '';
   const normalizedWhatsapp = digits(whatsapp);
-  if (!normalizedCode || normalizedWhatsapp.length < 10) return { error: 'INVALID' as const };
+  if (!/^[a-zA-Z0-9_-]{1,128}$/.test(normalizedCode) || normalizedWhatsapp.length < 10) return { error: 'INVALID' as const };
   const reference = database.collection('reservations').doc(normalizedCode);
   const snapshot = await reference.get();
-  if (!snapshot.exists || digits(snapshot.data()?.whatsapp) !== normalizedWhatsapp) return { error: 'NOT_FOUND' as const };
+  if (!snapshot.exists || snapshot.data()?.deletedAt || digits(snapshot.data()?.whatsapp) !== normalizedWhatsapp) return { error: 'NOT_FOUND' as const };
   return { database, reference, snapshot, data: snapshot.data() ?? {} };
 }
 
@@ -61,7 +62,8 @@ export async function POST(request: Request) {
   const result = await findReservation(payload?.code, payload?.whatsapp);
   if (result.error) return lookupError(result.error);
   const settings = await getOperationalSettings(result.database);
-  return NextResponse.json({ reservation: serializeReservation(result.reference.id, result.data, settings.minAdvanceHours, settings.lateToleranceMinutes, settings.restaurantWhatsapp) });
+  const notificationToken = await issueNotificationAccess(result.database, result.reference.id);
+  return NextResponse.json({ notificationToken, reservation: serializeReservation(result.reference.id, result.data, CANCELLATION_HOURS, settings.lateToleranceMinutes, settings.restaurantWhatsapp) }, { headers: { 'Cache-Control': 'private, no-store' } });
 }
 
 export async function PATCH(request: Request) {
@@ -77,10 +79,10 @@ export async function PATCH(request: Request) {
   const current = result.data;
   const currentStatus = String(current.status ?? 'confirmed') as ReservationStatus;
   const currentInstant = reservationInstant({ serviceDate: String(current.serviceDate ?? ''), arrivalTime: String(current.arrivalTime ?? '') });
-  const outsideDeadline = currentInstant.getTime() - Date.now() >= settings.minAdvanceHours * 60 * 60 * 1000;
+  const outsideDeadline = currentInstant.getTime() - Date.now() >= CANCELLATION_HOURS * 60 * 60 * 1000;
 
   if ((action === 'cancel' || action === 'update') && !outsideDeadline) {
-    return NextResponse.json({ error: `Alterações pelo site encerram ${settings.minAdvanceHours} horas antes. Fale com a equipe pelo WhatsApp.`, manualContactRequired: true, restaurantWhatsapp: settings.restaurantWhatsapp }, { status: 409 });
+    return NextResponse.json({ error: 'Alterações pelo site encerram 24 horas antes. Fale com a equipe pelo WhatsApp.', manualContactRequired: true, restaurantWhatsapp: settings.restaurantWhatsapp }, { status: 409 });
   }
   if (['cancelled', 'completed', 'no_show', 'seated'].includes(currentStatus)) {
     return NextResponse.json({ error: 'Esta reserva não aceita mais alterações.' }, { status: 409 });
@@ -90,48 +92,57 @@ export async function PATCH(request: Request) {
     if (currentStatus === 'pending_approval') return NextResponse.json({ error: 'Aguarde a aprovação da equipe antes de confirmar presença.' }, { status: 409 });
     if (currentStatus !== 'confirmed' && currentStatus !== 'presence_confirmed') return NextResponse.json({ error: 'Esta reserva não pode ser confirmada agora.' }, { status: 409 });
     if (currentStatus !== 'presence_confirmed') {
-      const batch = result.database.batch();
-      batch.update(result.reference, { status: 'presence_confirmed', updatedAt: FieldValue.serverTimestamp(), updatedBy: 'customer' });
-      batch.set(result.database.collection('auditLogs').doc(), { reservationId: result.reference.id, actorType: 'customer', actorId: null, action: 'reservation_presence_confirmed', fromStatus: currentStatus, toStatus: 'presence_confirmed', createdAt: FieldValue.serverTimestamp() });
-      await batch.commit();
+      await result.database.runTransaction(async (batch) => {
+        const snapshot = await batch.get(result.reference);
+        const fresh = snapshot.data();
+        if (!fresh || fresh.deletedAt || fresh.whatsapp !== digits(payload?.whatsapp) || fresh.status !== 'confirmed') return;
+        batch.update(result.reference, { status: 'presence_confirmed', updatedAt: FieldValue.serverTimestamp(), updatedBy: 'customer' });
+        batch.set(result.database.collection('auditLogs').doc(), { reservationId: result.reference.id, actorType: 'customer', actorId: null, action: 'reservation_presence_confirmed', fromStatus: 'confirmed', toStatus: 'presence_confirmed', createdAt: FieldValue.serverTimestamp() });
+        enqueueReservationEvent(result.database, batch, { eventType: 'reservation_presence_confirmed', entityType: 'reservation', entityId: result.reference.id, whatsapp: fresh.whatsapp, payload: { customerName: fresh.customerName, service: fresh.service, serviceDate: fresh.serviceDate, arrivalTime: fresh.arrivalTime, partySize: fresh.partySize, reservationCode: result.reference.id, lateToleranceMinutes: settings.lateToleranceMinutes } });
+      });
     }
   }
 
   if (action === 'cancel') {
-    const capacityRef = result.database.collection('serviceCapacity').doc(`${String(current.serviceDate)}_${String(current.service)}`);
+    try {
     await result.database.runTransaction(async (transaction) => {
-      const [freshReservation, capacitySnapshot] = await Promise.all([transaction.get(result.reference), transaction.get(capacityRef)]);
+      const freshReservation = await transaction.get(result.reference);
       if (!freshReservation.exists) throw new Error('NOT_FOUND');
       const freshData = freshReservation.data() ?? {};
       const freshStatus = String(freshData.status ?? 'confirmed') as ReservationStatus;
+      if (freshData.deletedAt || digits(freshData.whatsapp) !== digits(payload?.whatsapp) || ['cancelled', 'completed', 'no_show', 'seated'].includes(freshStatus) || reservationInstant(freshData as { serviceDate: string; arrivalTime: string }).getTime() - Date.now() < CANCELLATION_HOURS * 3_600_000) throw new Error('LOCKED');
+      const capacityRef = result.database.collection('serviceCapacity').doc(`${freshData.serviceDate}_${freshData.service}`);
+      const capacitySnapshot = await transaction.get(capacityRef);
       if (capacityStatuses.has(freshStatus)) {
         transaction.set(capacityRef, { heldSeats: Math.max(0, Number(capacitySnapshot.data()?.heldSeats ?? 0) - Number(freshData.partySize ?? 0)), updatedAt: FieldValue.serverTimestamp() }, { merge: true });
       }
       transaction.update(result.reference, { status: 'cancelled', updatedAt: FieldValue.serverTimestamp(), updatedBy: 'customer' });
       transaction.set(result.database.collection('auditLogs').doc(), { reservationId: result.reference.id, actorType: 'customer', actorId: null, action: 'reservation_cancelled', fromStatus: freshStatus, toStatus: 'cancelled', createdAt: FieldValue.serverTimestamp() });
-      transaction.set(result.database.collection('whatsappQueue').doc(), createWhatsAppOutboxEvent({
+      enqueueReservationEvent(result.database, transaction, {
         eventType: 'reservation_cancelled',
         entityType: 'reservation',
         entityId: result.reference.id,
         whatsapp: String(freshData.whatsapp ?? ''),
         payload: { customerName: String(freshData.customerName ?? ''), reservationCode: result.reference.id, service: String(freshData.service ?? ''), serviceDate: String(freshData.serviceDate ?? ''), arrivalTime: String(freshData.arrivalTime ?? ''), partySize: Number(freshData.partySize ?? 0), fromStatus: freshStatus, toStatus: 'cancelled' },
-      }));
+      });
     });
+    } catch (error) {
+      if (error instanceof Error && ['LOCKED', 'NOT_FOUND'].includes(error.message)) return NextResponse.json({ error: 'A reserva mudou ou o prazo encerrou. Consulte novamente ou fale com a equipe.' }, { status: 409 });
+      throw error;
+    }
   }
 
   if (action === 'update') {
     const reservation = payload?.reservation;
     if (!isReservationInput(reservation)) return NextResponse.json({ error: 'Revise os dados da reserva.' }, { status: 400 });
     const nextInstant = reservationInstant(reservation);
-    if (nextInstant.getTime() - Date.now() < settings.minAdvanceHours * 60 * 60 * 1000) return NextResponse.json({ error: `Escolha um horário com pelo menos ${settings.minAdvanceHours} horas de antecedência.` }, { status: 400 });
+    if (!canBook(reservation, settings.minAdvanceHours)) return NextResponse.json({ error: reservation.service === 'rodizio' ? 'As reservas para o rodízio encerram às 18h do dia da visita.' : `O almoço exige ${settings.minAdvanceHours} horas de antecedência.` }, { status: 400 });
     const latest = new Date(); latest.setMonth(latest.getMonth() + settings.maxBookingMonths);
     if (nextInstant.getTime() > latest.getTime()) return NextResponse.json({ error: `O calendário está aberto por ${settings.maxBookingMonths} meses.` }, { status: 400 });
     const arrivalLimit = reservation.service === 'almoco' ? settings.lunchArrivalLimit : settings.dinnerArrivalLimit;
     if (reservation.arrivalTime > arrivalLimit) return NextResponse.json({ error: `O horário máximo de chegada é ${arrivalLimit}.` }, { status: 400 });
 
-    const previousKey = `${String(current.serviceDate)}_${String(current.service)}`;
     const nextKey = `${reservation.serviceDate}_${reservation.service}`;
-    const previousCapacityRef = result.database.collection('serviceCapacity').doc(previousKey);
     const nextCapacityRef = result.database.collection('serviceCapacity').doc(nextKey);
     const nextStatus: ReservationStatus = reservation.partySize <= settings.autoApprovalLimit ? 'confirmed' : 'pending_approval';
     try {
@@ -140,7 +151,9 @@ export async function PATCH(request: Request) {
         if (!reservationSnapshot.exists) throw new Error('NOT_FOUND');
         const fresh = reservationSnapshot.data() ?? {};
         const freshStatus = String(fresh.status ?? 'confirmed') as ReservationStatus;
-        if (['cancelled', 'completed', 'no_show', 'seated'].includes(freshStatus)) throw new Error('LOCKED');
+        if (fresh.deletedAt || digits(fresh.whatsapp) !== digits(payload?.whatsapp) || ['cancelled', 'completed', 'no_show', 'seated'].includes(freshStatus) || reservationInstant(fresh as { serviceDate: string; arrivalTime: string }).getTime() - Date.now() < CANCELLATION_HOURS * 3_600_000) throw new Error('LOCKED');
+        const previousKey = `${fresh.serviceDate}_${fresh.service}`;
+        const previousCapacityRef = result.database.collection('serviceCapacity').doc(previousKey);
         const previousCapacitySnapshot = await transaction.get(previousCapacityRef);
         const nextCapacitySnapshot = previousKey === nextKey ? previousCapacitySnapshot : await transaction.get(nextCapacityRef);
         const specialDateSnapshot = await transaction.get(result.database.collection('specialDates').doc(nextKey));
@@ -179,7 +192,7 @@ export async function PATCH(request: Request) {
           String(fresh.notes ?? '') !== updated.notes
         );
         if (reservationDetailsChanged) {
-          transaction.set(result.database.collection('whatsappQueue').doc(), createWhatsAppOutboxEvent({
+          enqueueReservationEvent(result.database, transaction, {
             eventType: 'reservation_updated',
             entityType: 'reservation',
             entityId: result.reference.id,
@@ -188,6 +201,7 @@ export async function PATCH(request: Request) {
               customerName: updated.customerName,
               whatsapp: updated.whatsapp,
               reservationCode: result.reference.id,
+              lateToleranceMinutes: settings.lateToleranceMinutes,
               service: updated.service,
               serviceDate: updated.serviceDate,
               arrivalTime: updated.arrivalTime,
@@ -205,7 +219,7 @@ export async function PATCH(request: Request) {
                 notes: String(fresh.notes ?? ''),
               },
             },
-          }));
+          });
         }
       });
     } catch (error) {
@@ -217,5 +231,20 @@ export async function PATCH(request: Request) {
   }
 
   const updatedSnapshot = await result.reference.get();
-  return NextResponse.json({ reservation: serializeReservation(result.reference.id, updatedSnapshot.data() ?? {}, settings.minAdvanceHours, settings.lateToleranceMinutes, settings.restaurantWhatsapp) });
+  after(() => dispatchReservationPush(result.database, result.reference.id));
+  return NextResponse.json({ reservation: serializeReservation(result.reference.id, updatedSnapshot.data() ?? {}, CANCELLATION_HOURS, settings.lateToleranceMinutes, settings.restaurantWhatsapp) });
+}
+
+export async function DELETE(request: Request) {
+  const payload = await request.json().catch(() => null);
+  const result = await findReservation(payload?.code, payload?.whatsapp);
+  if (result.error) return lookupError(result.error);
+  try { await deleteReservation(result.database, result.reference.id, { type: 'customer', id: null, whatsapp: digits(payload.whatsapp) }); }
+  catch (error) {
+    if (error instanceof Error && error.message === 'DEADLINE') return NextResponse.json({ error: 'A exclusão pelo site encerra 24 horas antes. Fale com a equipe pelo WhatsApp.' }, { status: 409 });
+    if (error instanceof Error && error.message === 'NOT_FOUND') return lookupError('NOT_FOUND');
+    throw error;
+  }
+  after(() => dispatchReservationPush(result.database, result.reference.id));
+  return NextResponse.json({ ok: true });
 }

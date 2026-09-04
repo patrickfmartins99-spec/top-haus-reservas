@@ -4,8 +4,9 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { onAuthStateChanged, type User } from 'firebase/auth';
-import { CalendarDays, LoaderCircle, MessageCircle, Pencil, Plus, Save, Search, Users } from 'lucide-react';
+import { CalendarDays, LoaderCircle, MessageCircle, Pencil, Plus, Save, Search, Users, Trash2 } from 'lucide-react';
 
+import { ReservationTable } from '@/components/reservation-table';
 import { Badge } from '@/components/ui/badge';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -29,6 +30,7 @@ type Reservation = {
   status: string;
   source: string;
   notes: string;
+  tableLabel: string;
 };
 
 const times: Record<string, string[]> = {
@@ -85,6 +87,16 @@ export default function ReservationsPage() {
   const [search, setSearch] = useState(searchParams.get('busca') ?? '');
   const [dateFilter, setDateFilter] = useState('');
   const [serviceFilter, setServiceFilter] = useState('todos');
+  const [deleting, setDeleting] = useState<Reservation | null>(null);
+  async function removeReservation() {
+    if (!currentUser || !deleting) return;
+    setSaving(true); setError('');
+    try {
+      const response = await fetch(`/api/reservas/${deleting.id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${await currentUser.getIdToken()}` } });
+      const data = await response.json(); if (!response.ok) throw new Error(data.error);
+      setDeleting(null); await refresh(currentUser); setSuccess('Reserva excluída. Lugares liberados e auditoria preservada.');
+    } catch (error) { setError(error instanceof Error ? error.message : 'Não foi possível excluir.'); } finally { setSaving(false); }
+  }
   const [editingReservation, setEditingReservation] = useState<Reservation | null>(null);
 
   const refresh = useCallback(async (user: User) => {
@@ -169,7 +181,7 @@ export default function ReservationsPage() {
 
       <div className="grid gap-4 sm:grid-cols-3">
         <Card className="bg-white ring-black/7"><CardContent><p className="text-sm text-black/65">Reservas encontradas</p><p className="mt-2 text-3xl font-extrabold">{filteredReservations.length}</p></CardContent></Card>
-        <Card className="bg-white ring-black/7"><CardContent><p className="text-sm text-black/65">Pessoas reservadas</p><p className="mt-2 text-3xl font-extrabold">{filteredReservations.reduce((sum, item) => sum + item.partySize, 0)}</p></CardContent></Card>
+        <Card className="bg-white ring-black/7"><CardContent><p className="text-sm text-black/65">Pessoas reservadas</p><p className="mt-2 text-3xl font-extrabold">{filteredReservations.filter((item) => ['pending_approval', 'confirmed', 'presence_confirmed', 'seated'].includes(item.status)).reduce((sum, item) => sum + item.partySize, 0)}</p></CardContent></Card>
         <Card className="bg-white ring-black/7"><CardContent><p className="text-sm text-black/65">Aguardando aprovação</p><p className="mt-2 text-3xl font-extrabold">{filteredReservations.filter((item) => item.status === 'pending_approval').length}</p></CardContent></Card>
       </div>
 
@@ -181,15 +193,16 @@ export default function ReservationsPage() {
         <CardContent className="overflow-x-auto">
           {loading ? <p className="flex items-center justify-center gap-2 py-12 text-sm text-black/65"><LoaderCircle className="size-4 animate-spin" /> Carregando reservas...</p> : null}
           {!loading && filteredReservations.length === 0 ? <p className="py-12 text-center text-sm text-black/65">Nenhuma reserva encontrada.</p> : null}
-          {!loading && filteredReservations.length > 0 ? <Table><TableHeader><TableRow><TableHead>Data</TableHead><TableHead>Horário</TableHead><TableHead>Cliente</TableHead><TableHead>Contato</TableHead><TableHead>Pessoas</TableHead><TableHead>Serviço</TableHead><TableHead>Situação</TableHead><TableHead>Ações</TableHead></TableRow></TableHeader><TableBody>
+          {!loading && filteredReservations.length > 0 ? <Table><TableHeader><TableRow><TableHead>Data</TableHead><TableHead>Horário</TableHead><TableHead>Cliente</TableHead><TableHead>Contato</TableHead><TableHead>Pessoas</TableHead><TableHead>Serviço</TableHead><TableHead>Mesa</TableHead><TableHead>Situação</TableHead><TableHead>Ações</TableHead></TableRow></TableHeader><TableBody>
             {filteredReservations.map((reservation) => {
               const whatsappUrl = buildWhatsAppUrl(reservation.whatsapp, reservationMessage(reservation));
-              return <TableRow key={reservation.id} className={createdId === reservation.id ? 'bg-[#f4e7d7]' : undefined}><TableCell className="font-semibold">{formatDate(reservation.serviceDate)}</TableCell><TableCell className="font-bold">{reservation.arrivalTime}</TableCell><TableCell><p className="font-semibold">{reservation.customerName}</p><p className="font-mono text-[11px] font-semibold text-black/65">{reservation.id}</p></TableCell><TableCell className="font-medium text-black/70">{formatPhone(reservation.whatsapp)}</TableCell><TableCell><span className="flex items-center gap-1"><Users className="size-4 text-haus-terracotta" /> {reservation.partySize}</span></TableCell><TableCell className="capitalize">{reservation.service === 'almoco' ? 'Almoço' : 'Rodízio'}</TableCell><TableCell><Badge className={statusClass(reservation.status)}>{statusLabels[reservation.status] ?? reservation.status}</Badge></TableCell><TableCell><div className="flex gap-2"><Button type="button" variant="outline" size="sm" onClick={() => startEditing(reservation)}><Pencil /> Editar</Button>{whatsappUrl ? <a href={whatsappUrl} target="_blank" rel="noreferrer" className={buttonVariants({ variant: 'outline', size: 'sm', className: 'text-haus-terracotta' })}><MessageCircle /> WhatsApp</a> : null}</div></TableCell></TableRow>;
+              return <TableRow key={reservation.id} className={createdId === reservation.id ? 'bg-[#f4e7d7]' : undefined}><TableCell className="font-semibold">{formatDate(reservation.serviceDate)}</TableCell><TableCell className="font-bold">{reservation.arrivalTime}</TableCell><TableCell><p className="font-semibold">{reservation.customerName}</p><p className="font-mono text-[11px] font-semibold text-black/65">{reservation.id}</p></TableCell><TableCell className="font-medium text-black/70">{formatPhone(reservation.whatsapp)}</TableCell><TableCell><span className="flex items-center gap-1"><Users className="size-4 text-haus-terracotta" /> {reservation.partySize}</span></TableCell><TableCell className="capitalize">{reservation.service === 'almoco' ? 'Almoço' : 'Rodízio'}</TableCell><TableCell><ReservationTable id={reservation.id} initialValue={reservation.tableLabel} customerName={reservation.customerName} /></TableCell><TableCell><Badge className={statusClass(reservation.status)}>{statusLabels[reservation.status] ?? reservation.status}</Badge></TableCell><TableCell><div className="flex gap-2"><Button type="button" variant="outline" size="sm" onClick={() => startEditing(reservation)}><Pencil /> Editar</Button><Button type="button" variant="outline" size="sm" className="text-red-700" onClick={() => { setError(''); setDeleting(reservation); }}><Trash2 /> Excluir</Button>{whatsappUrl ? <a href="/painel/mensagens" target="_blank" rel="noreferrer" className={buttonVariants({ variant: 'outline', size: 'sm', className: 'text-haus-terracotta' })}><MessageCircle /> Mensagens</a> : null}</div></TableCell></TableRow>;
             })}
           </TableBody></Table> : null}
         </CardContent>
       </Card>
 
+      <Dialog open={deleting !== null} onOpenChange={(open) => { if (!open && !saving) setDeleting(null); }}><DialogContent><DialogHeader><DialogTitle>Excluir reserva de {deleting?.customerName}?</DialogTitle><DialogDescription>A reserva sairá das listas e os lugares serão liberados. A exclusão ficará registrada em seu nome na auditoria. Não há restauração pelo painel.</DialogDescription></DialogHeader>{error && <p role="alert" className="text-red-700">{error}</p>}<DialogFooter><Button variant="outline" disabled={saving} onClick={() => setDeleting(null)}>Voltar</Button><Button variant="destructive" disabled={saving} onClick={removeReservation}>Confirmar exclusão</Button></DialogFooter></DialogContent></Dialog>
       <Dialog open={editingReservation !== null} onOpenChange={(open) => { if (!open) setEditingReservation(null); }}>
         <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-2xl">
           {editingReservation ? <form onSubmit={saveReservation}>

@@ -10,9 +10,9 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { calledDurationMilliseconds, formatDurationClock, WAITLIST_CALL_HOLD_MINUTES, waitDurationMilliseconds } from '@/lib/domain/waitlist-time';
+import { calledDurationMilliseconds, formatDurationClock, waitDurationMilliseconds } from '@/lib/domain/waitlist-time';
 import { getFirebaseClient } from '@/lib/firebase/client';
-import { buildWhatsAppUrl } from '@/lib/whatsapp';
+import { buildWhatsAppUrl, customerMessage } from '@/lib/whatsapp';
 
 type QueueStatus = 'waiting' | 'called' | 'seated' | 'removed';
 type QueueEntry = {
@@ -128,7 +128,7 @@ export default function WaitlistPage() {
       setCustomerName(''); setWhatsapp(''); setPartySize('2');
       setEditingEntry(null);
       setDialogOpen(false);
-      setSuccess(edited ? 'Dados do cliente atualizados com sucesso.' : 'Cliente adicionado à fila. O WhatsApp ficou registrado para a notificação.');
+      setSuccess(edited ? 'Dados do cliente atualizados com sucesso.' : 'Cliente adicionado à fila. Confira o texto de boas-vindas na aba Mensagens.');
       await loadQueue(currentUser);
     } catch (caughtError) {
       setError(caughtError instanceof Error ? caughtError.message : 'Não foi possível salvar o cliente.');
@@ -148,7 +148,7 @@ export default function WaitlistPage() {
       const response = await staffRequest(currentUser, `/api/fila/${entry.id}`, { method: 'PATCH', body: JSON.stringify({ status }) });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? 'Não foi possível atualizar a fila.');
-      setSuccess(status === 'called' ? `${entry.customerName} foi marcado como chamado. Use o botão WhatsApp para enviar a mensagem pronta.` : 'Fila atualizada com sucesso.');
+      setSuccess(status === 'called' ? `${entry.customerName} foi marcado como chamado. Confira e envie a mensagem na aba Mensagens.` : 'Fila atualizada com sucesso.');
       await loadQueue(currentUser);
     } catch (caughtError) {
       setError(caughtError instanceof Error ? caughtError.message : 'Não foi possível atualizar a fila.');
@@ -174,10 +174,10 @@ export default function WaitlistPage() {
         {loading ? <p className="flex items-center justify-center gap-2 py-10 text-sm text-black/65"><LoaderCircle className="size-4 animate-spin" /> Carregando fila...</p> : null}
         {!loading && activeQueue.length === 0 ? <p className="py-10 text-center text-sm text-black/65">Nenhum cliente aguardando no momento.</p> : null}
         {activeQueue.map((entry, index) => {
-          const whatsappUrl = buildWhatsAppUrl(entry.whatsapp, `Olá, ${entry.customerName}! Sua mesa no Top Haus está disponível. Por favor, dirija-se à recepção. A mesa será mantida por ${WAITLIST_CALL_HOLD_MINUTES} minutos.`);
+          const whatsappUrl = buildWhatsAppUrl(entry.whatsapp, customerMessage(entry.status === 'called' ? 'waitlist_called' : 'waitlist_created', entry));
           const waitTime = formatDurationClock(waitDurationMilliseconds(entry, now));
           const calledTime = calledDurationMilliseconds(entry, now);
-          return <article key={entry.id} className={`flex flex-col gap-4 rounded-xl border p-4 sm:flex-row sm:items-center ${entry.status === 'called' ? 'border-haus-terracotta/35 bg-[#f4e7d7]' : 'border-black/8'}`}><span className="grid size-9 shrink-0 place-items-center rounded-full bg-black text-sm font-bold text-white">{index + 1}</span><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><p className="font-bold">{entry.customerName}</p><Badge className={entry.status === 'called' ? 'bg-haus-terracotta text-white' : 'bg-[#e7e1db] text-[#4f3528]'}>{statusLabel[entry.status]}</Badge></div><p className="mt-1 text-sm font-medium text-black/75">{entry.partySize} pessoas · {formatPhone(entry.whatsapp)}</p><p className="mt-1 font-mono text-sm font-bold text-black">{entry.status === 'called' ? `Aguardou ${waitTime}${calledTime === null ? '' : ` · chamado há ${formatDurationClock(calledTime)}`}` : `Aguardando há ${waitTime}`}</p></div><div className="flex flex-wrap gap-2"><Button disabled={saving} variant="outline" onClick={() => openEditEntry(entry)}><Pencil /> Editar</Button>{entry.status === 'waiting' ? <Button disabled={saving} onClick={() => updateStatus(entry, 'called')} className="bg-haus-terracotta text-white hover:bg-haus-terracotta/90"><PhoneCall /> Chamar</Button> : null}{entry.status === 'called' && whatsappUrl ? <a href={whatsappUrl} target="_blank" rel="noreferrer" className={buttonVariants({ variant: 'outline', className: 'border-haus-terracotta/30 text-haus-terracotta' })}><MessageCircle /> WhatsApp</a> : null}{entry.status === 'called' ? <Button disabled={saving} onClick={() => updateStatus(entry, 'seated')} className="bg-black text-white hover:bg-black/85"><Check /> Marcar atendido</Button> : null}<Button disabled={saving} variant="outline" onClick={() => updateStatus(entry, 'removed')}><UserRoundX /> Remover</Button></div></article>;
+          return <article key={entry.id} className={`flex flex-col gap-4 rounded-xl border p-4 sm:flex-row sm:items-center ${entry.status === 'called' ? 'border-haus-terracotta/35 bg-[#f4e7d7]' : 'border-black/8'}`}><span className="grid size-9 shrink-0 place-items-center rounded-full bg-black text-sm font-bold text-white">{index + 1}</span><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><p className="font-bold">{entry.customerName}</p><Badge className={entry.status === 'called' ? 'bg-haus-terracotta text-white' : 'bg-[#e7e1db] text-[#4f3528]'}>{statusLabel[entry.status]}</Badge></div><p className="mt-1 text-sm font-medium text-black/75">{entry.partySize} pessoas · {formatPhone(entry.whatsapp)}</p><p className="mt-1 font-mono text-sm font-bold text-black">{entry.status === 'called' ? `Aguardou ${waitTime}${calledTime === null ? '' : ` · chamado há ${formatDurationClock(calledTime)}`}` : `Aguardando há ${waitTime}`}</p></div><div className="flex flex-wrap gap-2"><Button disabled={saving} variant="outline" onClick={() => openEditEntry(entry)}><Pencil /> Editar</Button>{entry.status === 'waiting' ? <Button disabled={saving} onClick={() => updateStatus(entry, 'called')} className="bg-haus-terracotta text-white hover:bg-haus-terracotta/90"><PhoneCall /> Chamar</Button> : null}{whatsappUrl ? <a href="/painel/mensagens" target="_blank" rel="noreferrer" className={buttonVariants({ variant: 'outline', className: 'border-haus-terracotta/30 text-haus-terracotta' })}><MessageCircle /> WhatsApp</a> : null}{entry.status === 'called' ? <Button disabled={saving} onClick={() => updateStatus(entry, 'seated')} className="bg-black text-white hover:bg-black/85"><Check /> Marcar atendido</Button> : null}<Button disabled={saving} variant="outline" onClick={() => updateStatus(entry, 'removed')}><UserRoundX /> Remover</Button></div></article>;
         })}
       </CardContent></Card>
 
