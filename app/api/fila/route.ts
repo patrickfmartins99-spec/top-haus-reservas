@@ -3,11 +3,19 @@ import { after, NextResponse } from 'next/server';
 
 import { requireStaff } from '@/lib/auth/staff-request';
 import { getAdminDatabase } from '@/lib/firebase/admin';
-import { enqueueStaffNotification, dispatchStaffNotifications } from '@/lib/firebase/staff-push';
+import {
+  enqueueStaffNotification,
+  dispatchStaffNotifications,
+} from '@/lib/firebase/staff-push';
 import { createWhatsAppOutboxEvent } from '@/lib/firebase/whatsapp-outbox';
 
 function serializeTimestamp(value: unknown) {
-  if (value && typeof value === 'object' && 'toDate' in value && typeof value.toDate === 'function') {
+  if (
+    value &&
+    typeof value === 'object' &&
+    'toDate' in value &&
+    typeof value.toDate === 'function'
+  ) {
     return value.toDate().toISOString();
   }
   return null;
@@ -15,12 +23,24 @@ function serializeTimestamp(value: unknown) {
 
 export async function GET(request: Request) {
   const context = await requireStaff(request);
-  if (!context) return NextResponse.json({ error: 'Acesso restrito à equipe.' }, { status: 403 });
+  if (!context)
+    return NextResponse.json(
+      { error: 'Acesso restrito à equipe.' },
+      { status: 403 },
+    );
 
   const database = getAdminDatabase();
-  if (!database) return NextResponse.json({ error: 'Firebase não configurado.' }, { status: 503 });
+  if (!database)
+    return NextResponse.json(
+      { error: 'Firebase não configurado.' },
+      { status: 503 },
+    );
 
-  const snapshot = await database.collection('waitlist').orderBy('enteredAt', 'asc').limit(200).get();
+  const snapshot = await database
+    .collection('waitlist')
+    .orderBy('enteredAt', 'asc')
+    .limit(200)
+    .get();
   const entries = snapshot.docs.map((document) => {
     const data = document.data();
     return {
@@ -33,6 +53,11 @@ export async function GET(request: Request) {
       calledAt: serializeTimestamp(data.calledAt),
       seatedAt: serializeTimestamp(data.seatedAt),
       removedAt: serializeTimestamp(data.removedAt),
+      noShowAt: serializeTimestamp(data.noShowAt),
+      endedAt: serializeTimestamp(data.endedAt),
+      exitReason: String(data.exitReason ?? ''),
+      exitReasonLabel: String(data.exitReasonLabel ?? ''),
+      exitNote: String(data.exitNote ?? ''),
     };
   });
 
@@ -41,19 +66,44 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   const context = await requireStaff(request);
-  if (!context) return NextResponse.json({ error: 'Acesso restrito à equipe.' }, { status: 403 });
+  if (!context)
+    return NextResponse.json(
+      { error: 'Acesso restrito à equipe.' },
+      { status: 403 },
+    );
 
-  const payload = await request.json().catch(() => null) as Record<string, unknown> | null;
-  const customerName = typeof payload?.customerName === 'string' ? payload.customerName.trim() : '';
-  const whatsapp = typeof payload?.whatsapp === 'string' ? payload.whatsapp.replace(/\D/g, '') : '';
+  const payload = (await request.json().catch(() => null)) as Record<
+    string,
+    unknown
+  > | null;
+  const customerName =
+    typeof payload?.customerName === 'string'
+      ? payload.customerName.trim()
+      : '';
+  const whatsapp =
+    typeof payload?.whatsapp === 'string'
+      ? payload.whatsapp.replace(/\D/g, '')
+      : '';
   const partySize = Number(payload?.partySize);
 
-  if (customerName.length < 2 || whatsapp.length < 10 || !Number.isInteger(partySize) || partySize < 1) {
-    return NextResponse.json({ error: 'Preencha nome, WhatsApp e quantidade de pessoas.' }, { status: 400 });
+  if (
+    customerName.length < 2 ||
+    whatsapp.length < 10 ||
+    !Number.isInteger(partySize) ||
+    partySize < 1
+  ) {
+    return NextResponse.json(
+      { error: 'Preencha nome, WhatsApp e quantidade de pessoas.' },
+      { status: 400 },
+    );
   }
 
   const database = getAdminDatabase();
-  if (!database) return NextResponse.json({ error: 'Firebase não configurado.' }, { status: 503 });
+  if (!database)
+    return NextResponse.json(
+      { error: 'Firebase não configurado.' },
+      { status: 503 },
+    );
 
   const entryRef = database.collection('waitlist').doc();
   const whatsappEventRef = database.collection('whatsappQueue').doc();
@@ -76,14 +126,24 @@ export async function POST(request: Request) {
     changes: { customerName, partySize },
     createdAt: FieldValue.serverTimestamp(),
   });
-  batch.set(whatsappEventRef, createWhatsAppOutboxEvent({
-    eventType: 'waitlist_created',
-    entityType: 'waitlist',
-    entityId: entryRef.id,
-    whatsapp,
-    payload: { customerName, partySize },
-  }));
-  enqueueStaffNotification(database, batch, whatsappEventRef.id, 'waitlist_created', entryRef.id, 'waitlist');
+  batch.set(
+    whatsappEventRef,
+    createWhatsAppOutboxEvent({
+      eventType: 'waitlist_created',
+      entityType: 'waitlist',
+      entityId: entryRef.id,
+      whatsapp,
+      payload: { customerName, partySize },
+    }),
+  );
+  enqueueStaffNotification(
+    database,
+    batch,
+    whatsappEventRef.id,
+    'waitlist_created',
+    entryRef.id,
+    'waitlist',
+  );
   await batch.commit();
   after(() => dispatchStaffNotifications(database));
 

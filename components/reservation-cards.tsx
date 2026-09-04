@@ -34,7 +34,7 @@ export function ReservationCards({
       {items.map((r) => (
         <article
           key={r.id}
-          className="min-w-0 space-y-4 rounded-2xl border border-black/15 bg-white p-4 sm:p-5"
+          className="min-w-0 space-y-4 rounded-2xl border border-black/12 bg-white p-4 shadow-[0_10px_30px_rgba(0,0,0,0.09)] transition-shadow hover:shadow-[0_14px_36px_rgba(0,0,0,0.13)] sm:p-5"
           aria-label={'Reserva de ' + r.customerName}
         >
           <header className="flex items-start justify-between gap-3">
