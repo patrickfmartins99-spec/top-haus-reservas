@@ -7,6 +7,13 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import {
+  collection,
+  limit,
+  onSnapshot,
+  orderBy,
+  query,
+} from 'firebase/firestore';
+import {
   Bell,
   CalendarDays,
   ChartNoAxesCombined,
@@ -120,6 +127,7 @@ export function StaffShell({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (checkingSession) return;
+    const firebase = getFirebaseClient();
     const initial = window.setTimeout(() => {
       void loadNotifications();
     }, 0);
@@ -129,6 +137,28 @@ export function StaffShell({ children }: { children: ReactNode }) {
     const refresh = () => {
       void loadNotifications();
     };
+    let receivedInitialSnapshot = false;
+    const stopRealtime = firebase
+      ? onSnapshot(
+          query(
+            collection(firebase.db, 'staffNotifications'),
+            orderBy('createdAt', 'desc'),
+            limit(1),
+          ),
+          (snapshot) => {
+            if (
+              receivedInitialSnapshot &&
+              snapshot.docChanges().some((change) => change.type === 'added')
+            ) {
+              refresh();
+            }
+            receivedInitialSnapshot = true;
+          },
+          () => {
+            // O intervalo e o foco continuam como contingência se a conexão cair.
+          },
+        )
+      : () => {};
     window.addEventListener('focus', refresh);
     navigator.serviceWorker?.addEventListener('message', refresh);
     return () => {
@@ -136,6 +166,7 @@ export function StaffShell({ children }: { children: ReactNode }) {
       window.clearInterval(interval);
       window.removeEventListener('focus', refresh);
       navigator.serviceWorker?.removeEventListener('message', refresh);
+      stopRealtime();
     };
   }, [checkingSession, pathname]);
 

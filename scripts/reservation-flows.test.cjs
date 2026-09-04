@@ -125,6 +125,7 @@ const routes = load('app/api/reservas/[id]/route.ts');
 const createRoute = load('app/api/reservas/route.ts');
 const waitlistOutcomeRoute = load('app/api/fila/[id]/route.ts');
 const notifications = load('lib/firebase/reservation-notifications.ts');
+const staffPush = load('lib/firebase/staff-push.ts');
 const clientRoute = load('app/api/minha-reserva/route.ts');
 const customerNotificationsRoute = load(
   'app/api/cliente/notificacoes/route.ts',
@@ -350,6 +351,11 @@ test('criação não aceita campos administrativos injetados pelo cliente', asyn
   assert.equal(saved.tableLabel, undefined);
   assert.equal(saved.status, 'confirmed');
   assert.equal(saved.source, 'customer_web');
+  const notification = [...db.data.entries()].find(([key]) =>
+    key.startsWith('staffNotifications/'),
+  )[1];
+  assert.equal(notification.title, 'Nova reserva pelo site');
+  assert.match(notification.description, /Cliente Teste · 4 pessoas/);
 });
 test('criação de rodízio após prazo é barrada no servidor', async () => {
   fixture();
@@ -492,12 +498,15 @@ test('evento da reserva gera push só da equipe e aviso interno do cliente', asy
   await deletion.deleteReservation(db, 'r1', {
     type: 'staff',
     id: 'test-staff',
+    name: 'Patrick',
     reason: 'changed_plans',
   });
   const event = [...db.data.entries()].find(([key]) =>
     key.startsWith('staffNotifications/'),
   )[1];
   assert.equal(event.pushStatus, 'pending');
+  assert.equal(event.title, 'Reserva cancelada por Patrick');
+  assert.match(event.description, /Cliente Teste · 4 pessoas/);
   assert.match(event.href, /^\/painel\//);
   const customerEvent = [...db.data.entries()].find(([key]) =>
     key.startsWith('reservations/r1/notifications/'),
@@ -507,6 +516,36 @@ test('evento da reserva gera push só da equipe e aviso interno do cliente', asy
   assert.equal(
     [...db.data.keys()].some((key) => key.includes('pushSubscriptions')),
     false,
+  );
+});
+
+test('avisos distinguem cliente, colaborador e necessidade de aprovação', () => {
+  const payload = {
+    customerName: 'Mariana',
+    partySize: 6,
+    service: 'rodizio',
+    serviceDate: '2026-12-12',
+    arrivalTime: '19:00',
+  };
+  assert.equal(
+    staffPush.staffNotificationContent({
+      id: '1',
+      eventType: 'reservation_confirmed',
+      entityId: 'r1',
+      payload,
+      actor: { type: 'staff', name: 'Guilherme' },
+    }).title,
+    'Reserva adicionada por Guilherme',
+  );
+  assert.equal(
+    staffPush.staffNotificationContent({
+      id: '2',
+      eventType: 'reservation_updated',
+      entityId: 'r1',
+      payload: { ...payload, toStatus: 'pending_approval' },
+      actor: { type: 'customer' },
+    }).title,
+    'Reserva alterada e precisa de aprovação',
   );
 });
 test('textos usam destaque e evitam repetir apresentação da equipe', () => {

@@ -225,6 +225,11 @@ export async function POST(request: Request) {
           status,
           lateToleranceMinutes: settings.lateToleranceMinutes,
         },
+        staffNotification: {
+          actorType: staffContext ? 'staff' : 'customer',
+          actorName:
+            staffContext?.user?.displayName ?? staffContext?.decodedToken.name,
+        },
       });
     });
   } catch (error) {

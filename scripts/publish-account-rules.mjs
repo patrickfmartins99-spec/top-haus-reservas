@@ -36,7 +36,7 @@ try {
   }
   if (
     previous.rulesetName !==
-    'projects/reservastophausnavega/rulesets/01cf3fd1-53cb-4037-8c45-dbe77c00aaf0'
+    'projects/reservastophausnavega/rulesets/d3895026-fbf3-470c-b693-71b2a314271c'
   )
     throw new Error(
       'As regras mudaram desde a revisão. Publicação interrompida.',

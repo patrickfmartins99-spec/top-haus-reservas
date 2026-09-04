@@ -3,6 +3,7 @@ import { createRequire } from 'node:module';
 import { mkdir } from 'node:fs/promises';
 const require = createRequire(import.meta.url);
 const puppeteer = require(process.env.PUPPETEER_MODULE || 'puppeteer');
+const base = process.env.TEST_BASE_URL || 'http://localhost:3100';
 const output = new URL('../../../validation-reservations/', import.meta.url);
 await mkdir(output, { recursive: true });
 const browser = await puppeteer.launch({
@@ -287,7 +288,7 @@ async function waitText(text) {
 }
 try {
   await page.setViewport({ width: 390, height: 844, deviceScaleFactor: 1 });
-  await page.goto('http://localhost:3100/', { waitUntil: 'networkidle0' });
+  await page.goto(`${base}/`, { waitUntil: 'networkidle0' });
   await waitText('Fazer uma reserva');
   await page.$eval('#date', (input) => {
     const set = Object.getOwnPropertyDescriptor(
@@ -320,7 +321,7 @@ try {
     fullPage: true,
   });
   console.log('PASS: reserva de cliente e sino, viewport celular.');
-  await page.goto('http://localhost:3100/entrar', {
+  await page.goto(`${base}/entrar`, {
     waitUntil: 'networkidle0',
   });
   await page.type('#username', 'stafftest');
@@ -356,7 +357,7 @@ try {
     fullPage: true,
   });
   console.log('PASS: login simulado e mesa no painel.');
-  await page.goto('http://localhost:3100/painel/reservas', {
+  await page.goto(`${base}/painel/reservas`, {
     waitUntil: 'networkidle0',
   });
   await click('Cancelar');
@@ -370,7 +371,7 @@ try {
   assert.equal(deleted, true);
   assert.equal(cancellationReasonSeen, 'unexpected_event');
   console.log('PASS: motivo obrigatório no cancelamento e lista atualizada.');
-  await page.goto('http://localhost:3100/painel/fila', {
+  await page.goto(`${base}/painel/fila`, {
     waitUntil: 'networkidle0',
   });
   await waitText('Cliente da Fila');
@@ -385,7 +386,7 @@ try {
   assert.equal(queueOutcome, 'removed');
   console.log('PASS: fila registra chegada, saída e no show com motivo.');
   await page.setViewport({ width: 390, height: 844 });
-  await page.goto('http://localhost:3100/painel/relatorios', {
+  await page.goto(`${base}/painel/relatorios`, {
     waitUntil: 'networkidle0',
   });
   await waitText('Movimento diário');
@@ -405,7 +406,7 @@ try {
     fullPage: true,
   });
   console.log('PASS: relatórios administrativos responsivos.');
-  await page.goto('http://localhost:3100/painel/mensagens', {
+  await page.goto(`${base}/painel/mensagens`, {
     waitUntil: 'networkidle0',
   });
   await waitText('Modelos por ação');
@@ -421,7 +422,7 @@ try {
   });
   await page.keyboard.press('Escape');
   await page.setViewport({ width: 360, height: 800 });
-  await page.goto('http://localhost:3100/painel/usuarios', {
+  await page.goto(`${base}/painel/usuarios`, {
     waitUntil: 'networkidle0',
   });
   await waitText('Usuários da equipe');
@@ -447,7 +448,7 @@ try {
   await waitText('Acesso salvo com sucesso.');
   assert.ok(editedUser);
   testRole = 'staff';
-  await page.goto('http://localhost:3100/painel/configuracoes', {
+  await page.goto(`${base}/painel/configuracoes`, {
     waitUntil: 'networkidle0',
   });
   await waitText('Minha conta');
@@ -482,7 +483,7 @@ try {
   await click('Salvar alterações');
   await waitText('Sua conta foi atualizada.');
   assert.equal(profile.displayName, 'Meu Novo Nome');
-  await page.goto('http://localhost:3100/painel/usuarios', {
+  await page.goto(`${base}/painel/usuarios`, {
     waitUntil: 'networkidle0',
   });
   await waitText('Área exclusiva do administrador.');

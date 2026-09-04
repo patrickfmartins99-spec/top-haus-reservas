@@ -203,45 +203,53 @@ export async function PATCH(
       : {}),
     createdAt: FieldValue.serverTimestamp(),
   });
-  if (
-    ((status && status !== previousStatus) || !status) &&
-    status !== 'no_show'
-  ) {
+  if ((status && status !== previousStatus) || !status) {
     const eventType =
       status === 'called'
         ? 'waitlist_called'
         : status === 'removed'
           ? 'waitlist_removed'
-          : status === 'seated'
-            ? 'waitlist_seated'
-            : 'waitlist_updated';
+          : status === 'no_show'
+            ? 'waitlist_no_show'
+            : status === 'seated'
+              ? 'waitlist_seated'
+              : 'waitlist_updated';
     const eventRef = database.collection('whatsappQueue').doc();
-    enqueueStaffNotification(
-      database,
-      batch,
-      eventRef.id,
+    enqueueStaffNotification(database, batch, {
+      id: eventRef.id,
       eventType,
-      id,
-      'waitlist',
-    );
-    batch.set(
-      eventRef,
-      createWhatsAppOutboxEvent({
-        eventType,
-        entityType: 'waitlist',
-        entityId: id,
-        whatsapp: nextWhatsapp,
-        payload: {
-          customerName: nextCustomerName,
-          partySize: nextPartySize,
-          fromStatus: previousStatus,
-          toStatus: status ?? previousStatus,
-          ...(status === 'called'
-            ? { holdMinutes: WAITLIST_CALL_HOLD_MINUTES }
-            : {}),
-        },
-      }),
-    );
+      entityId: id,
+      entityType: 'waitlist',
+      payload: {
+        customerName: nextCustomerName,
+        partySize: nextPartySize,
+      },
+      actor: {
+        type: 'staff',
+        name: context.user?.displayName ?? context.decodedToken.name,
+      },
+    });
+    if (status !== 'no_show') {
+      batch.set(
+        eventRef,
+        createWhatsAppOutboxEvent({
+          eventType:
+            eventType === 'waitlist_no_show' ? 'waitlist_removed' : eventType,
+          entityType: 'waitlist',
+          entityId: id,
+          whatsapp: nextWhatsapp,
+          payload: {
+            customerName: nextCustomerName,
+            partySize: nextPartySize,
+            fromStatus: previousStatus,
+            toStatus: status ?? previousStatus,
+            ...(status === 'called'
+              ? { holdMinutes: WAITLIST_CALL_HOLD_MINUTES }
+              : {}),
+          },
+        }),
+      );
+    }
   }
   await batch.commit();
   after(() => dispatchStaffNotifications(database));

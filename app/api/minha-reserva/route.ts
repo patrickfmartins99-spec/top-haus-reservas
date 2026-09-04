@@ -229,6 +229,7 @@ export async function PATCH(request: Request) {
             reservationCode: result.reference.id,
             lateToleranceMinutes: settings.lateToleranceMinutes,
           },
+          staffNotification: { actorType: 'customer' },
         });
       });
     }
@@ -313,6 +314,7 @@ export async function PATCH(request: Request) {
             fromStatus: freshStatus,
             toStatus: 'cancelled',
           },
+          staffNotification: { actorType: 'customer' },
         });
       });
     } catch (error) {
@@ -528,6 +530,7 @@ export async function PATCH(request: Request) {
                 notes: String(fresh.notes ?? ''),
               },
             },
+            staffNotification: { actorType: 'customer' },
           });
         }
       });

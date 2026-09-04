@@ -17,6 +17,7 @@ export async function deleteReservation(
   actor: {
     type: 'staff' | 'customer';
     id: string | null;
+    name?: string;
     whatsapp?: string;
     reason?: string;
     note?: string;
@@ -113,6 +114,10 @@ export async function deleteReservation(
         service: data.service,
         reservationCode: id,
         deleted: true,
+      },
+      staffNotification: {
+        actorType: actor.type,
+        actorName: actor.name,
       },
     });
   });

@@ -24,6 +24,10 @@ export type WhatsAppOutboxInput = {
   entityId: string;
   whatsapp: string;
   payload: Record<string, unknown>;
+  staffNotification?: {
+    actorType: 'customer' | 'staff' | 'system';
+    actorName?: string;
+  };
 };
 
 export function createWhatsAppOutboxEvent(input: WhatsAppOutboxInput) {

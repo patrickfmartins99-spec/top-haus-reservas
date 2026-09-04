@@ -136,14 +136,17 @@ export async function POST(request: Request) {
       payload: { customerName, partySize },
     }),
   );
-  enqueueStaffNotification(
-    database,
-    batch,
-    whatsappEventRef.id,
-    'waitlist_created',
-    entryRef.id,
-    'waitlist',
-  );
+  enqueueStaffNotification(database, batch, {
+    id: whatsappEventRef.id,
+    eventType: 'waitlist_created',
+    entityId: entryRef.id,
+    entityType: 'waitlist',
+    payload: { customerName, partySize },
+    actor: {
+      type: 'staff',
+      name: context.user?.displayName ?? context.decodedToken.name,
+    },
+  });
   await batch.commit();
   after(() => dispatchStaffNotifications(database));
 

@@ -238,6 +238,10 @@ export async function PATCH(
             fromStatus: previousStatus,
             toStatus: status,
           },
+          staffNotification: {
+            actorType: 'staff',
+            actorName: context.user?.displayName ?? context.decodedToken.name,
+          },
         });
       });
     } catch (error) {
@@ -566,6 +570,10 @@ export async function PATCH(
               notes: String(previous.notes ?? ''),
             },
           },
+          staffNotification: {
+            actorType: 'staff',
+            actorName: context.user?.displayName ?? context.decodedToken.name,
+          },
         });
       }
     });
@@ -622,6 +630,7 @@ export async function DELETE(
     await deleteReservation(db, id, {
       type: 'staff',
       id: context.decodedToken.uid,
+      name: context.user?.displayName ?? context.decodedToken.name,
       reason: typeof payload?.reason === 'string' ? payload.reason : '',
       note: typeof payload?.note === 'string' ? payload.note : '',
     });
