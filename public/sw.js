@@ -5,7 +5,7 @@ self.addEventListener('push', (event) => {
   let data = {};
   try { data = event.data?.json() ?? {}; } catch { /* Use a safe generic notification. */ }
   event.waitUntil((async () => {
-    await self.registration.showNotification(data.title || 'Top Haus Reservas', { body: data.body || 'Há uma atualização no painel da equipe.', icon: '/icon', badge: '/favicon.svg', tag: data.tag, data: { url: data.url || '/painel' } });
+    await self.registration.showNotification(data.title || 'Top Haus Reservas', { body: data.body || 'Há uma atualização no painel da equipe.', icon: '/icon', badge: '/icon', tag: data.tag, data: { url: data.url || '/painel' } });
     const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
     for (const client of windows) client.postMessage({ type: 'reservation-notification' });
   })());
@@ -22,3 +22,4 @@ self.addEventListener('notificationclick', (event) => {
     await self.clients.openWindow(url.href);
   })());
 });
+
