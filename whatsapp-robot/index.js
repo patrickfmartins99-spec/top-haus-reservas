@@ -8,9 +8,14 @@ const qrcode = require('qrcode-terminal');
 const { Client, LocalAuth } = require('whatsapp-web.js');
 const { LoadUtils } = require('whatsapp-web.js/src/util/Injected/Utils');
 const { createReadinessGate } = require('./whatsapp-readiness');
+const { acquireInstanceLock, createShutdown } = require('./robot-lifecycle');
 const { buildMessage, normalizeBrazilianPhone, positiveNumber } = require('./messages');
 
-const ROBOT_VERSION = '2.0.1';
+const ROBOT_VERSION = '2.0.2';
+const CHECK_ONLY = process.argv.includes('--verificar-whatsapp');
+let releaseInstance = async () => {};
+let stopping = false;
+let checkTimeout = null;
 const ROBOT_ID = `${os.hostname()}-${process.pid}`;
 const SEND_DELAY_MIN_MS = positiveNumber(process.env.SEND_DELAY_MIN_MS, 5000);
 const SEND_DELAY_MAX_MS = Math.max(SEND_DELAY_MIN_MS, positiveNumber(process.env.SEND_DELAY_MAX_MS, 10000));
@@ -64,12 +69,11 @@ const client = new Client({
     rmMaxRetries: 10,
   }),
   puppeteer: {
-    headless: false,
+    headless: true,
     ...(chromePath ? { executablePath: chromePath } : {}),
     args: [
       '--disable-gpu',
       '--disable-dev-shm-usage',
-      '--start-minimized',
       '--no-sandbox',
       '--disable-setuid-sandbox',
     ],
@@ -82,13 +86,19 @@ const checkSendReadiness = createReadinessGate({
 });
 
 function markWhatsappReady(source) {
-  if (whatsappReady) return;
+  if (whatsappReady || stopping) return;
   whatsappReady = true;
   console.log(`✅ Robô de reservas conectado e pronto (${source})`);
+  if (CHECK_ONLY) {
+    console.log('✅ VERIFICAÇÃO CONCLUÍDA — nenhuma mensagem enviada.');
+    shutdown('verificação concluída');
+    return;
+  }
   startQueuePolling();
 }
 
 async function checkWhatsappState() {
+  if (stopping) return;
   if (await checkSendReadiness()) {
     markWhatsappReady('funções de envio verificadas');
   } else {
@@ -146,14 +156,14 @@ function timestampMilliseconds(value) {
 }
 
 function startQueuePolling() {
-  if (pollingTimer) return;
+  if (pollingTimer || stopping || CHECK_ONLY) return;
   console.log(`👀 Consultando novas mensagens a cada ${POLL_INTERVAL_MS / 1000} segundo(s)`);
   pollQueue();
   pollingTimer = setInterval(pollQueue, POLL_INTERVAL_MS);
 }
 
 async function pollQueue() {
-  if (polling) return;
+  if (polling || stopping || CHECK_ONLY) return;
   polling = true;
 
   try {
@@ -220,7 +230,7 @@ async function claimEvent(id) {
 }
 
 async function processQueue() {
-  if (processing || queue.length === 0) return;
+  if (processing || queue.length === 0 || stopping || CHECK_ONLY) return;
   processing = true;
   if (!(await checkSendReadiness())) {
     processing = false;
@@ -294,31 +304,39 @@ function randomDelay() {
   return Math.floor(Math.random() * (SEND_DELAY_MAX_MS - SEND_DELAY_MIN_MS + 1)) + SEND_DELAY_MIN_MS;
 }
 
-async function shutdown(signal) {
-  console.log(`\n🛑 Encerrando o robô (${signal})...`);
-  if (pollingTimer) clearInterval(pollingTimer);
-  if (whatsappStateTimer) clearInterval(whatsappStateTimer);
-  await client.destroy().catch(() => undefined);
-  process.exit(0);
-}
+const shutdown = createShutdown({
+  client,
+  stopWork: () => {
+    stopping = true;
+    whatsappReady = false;
+    clearInterval(pollingTimer);
+    clearInterval(whatsappStateTimer);
+    clearTimeout(checkTimeout);
+  },
+  release: () => releaseInstance(),
+});
 
 process.on('SIGINT', () => shutdown('CTRL+C'));
 process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGHUP', () => shutdown('janela do CMD fechada'));
 process.on('unhandledRejection', (error) => console.error('❌ Promise não tratada:', error));
 process.on('uncaughtException', (error) => console.error('❌ Exceção não tratada:', error));
 
 async function startRobot() {
+  releaseInstance = await acquireInstanceLock(path.join(__dirname, '.sessao-whatsapp'));
   console.log('🚀 Iniciando o robô de reservas Top Haus...');
+  console.log('🖥️ Puppeteer em modo oculto — nenhuma janela de navegador será aberta.');
   console.log(chromePath ? `🌐 Chrome encontrado: ${chromePath}` : '🌐 Usando o navegador fornecido pelo pacote');
 
   await db.collection('whatsappQueue').limit(1).get();
   console.log('✅ Leitura do Firestore confirmada');
 
   startWhatsappStateMonitor();
+  if (CHECK_ONLY) checkTimeout = setTimeout(() => shutdown('verificação não concluiu em 60 segundos', 1), 60000);
   await client.initialize();
 }
 
 startRobot().catch((error) => {
   console.error('❌ Não foi possível iniciar o robô:', error);
-  process.exitCode = 1;
+  shutdown('falha na inicialização', 1);
 });

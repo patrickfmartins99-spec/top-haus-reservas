@@ -14,7 +14,9 @@ Este programa fica aberto no computador do restaurante e acompanha a coleção `
 
 Depois da autenticação, a sessão fica salva somente nesse computador. Nas próximas inicializações, normalmente não será necessário escanear novamente.
 
-No Windows, mantenha aberta a janela do WhatsApp Web iniciada pelo robô. O modo invisível pode ficar preso em 100% sem concluir o estado de pronto.
+O Puppeteer opera em modo oculto, sem abrir janela de navegador. Para encerrar, prefira Ctrl+C e aguarde a saída do robô antes de fechar o CMD. A proteção de instância impede abrir duas cópias usando a mesma sessão.
+
+Para verificar a inicialização sem enviar mensagens, execute `node index.js --verificar-whatsapp`. O diagnóstico encerra o navegador ao concluir ou após 60 segundos.
 
 No uso diário, abra o CMD, entre na pasta do robô e execute `node index.js`. A sessão persistente fica em `.sessao-whatsapp` e é separada do WhatsApp Web normal e do robô de Fidelidade.
 
