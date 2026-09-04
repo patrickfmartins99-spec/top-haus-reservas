@@ -8,7 +8,7 @@ const qrcode = require('qrcode-terminal');
 const { Client, LocalAuth } = require('whatsapp-web.js');
 const { buildMessage, normalizeBrazilianPhone, positiveNumber } = require('./messages');
 
-const ROBOT_VERSION = '1.0.0';
+const ROBOT_VERSION = '2.0.0';
 const ROBOT_ID = `${os.hostname()}-${process.pid}`;
 const SEND_DELAY_MIN_MS = positiveNumber(process.env.SEND_DELAY_MIN_MS, 5000);
 const SEND_DELAY_MAX_MS = Math.max(SEND_DELAY_MIN_MS, positiveNumber(process.env.SEND_DELAY_MAX_MS, 10000));
@@ -46,23 +46,56 @@ const queuedIds = new Set();
 let processing = false;
 let pollingTimer = null;
 let polling = false;
+let whatsappReady = false;
+let whatsappStateTimer = null;
+
+const chromeCandidates = [
+  'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+  'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+];
+const chromePath = chromeCandidates.find((candidate) => fs.existsSync(candidate));
 
 const client = new Client({
   authStrategy: new LocalAuth({
-    clientId: process.env.WHATSAPP_SESSION_NAME || 'top-haus-reservas',
-    dataPath: path.join(__dirname, '.wwebjs_auth'),
+    clientId: process.env.WHATSAPP_SESSION_NAME || 'top-haus-reservas-v2',
+    dataPath: path.join(__dirname, '.sessao-whatsapp'),
+    rmMaxRetries: 10,
   }),
   puppeteer: {
-    // WhatsApp Web pode ficar preso em 100% no modo invisivel no Windows.
     headless: false,
+    ...(chromePath ? { executablePath: chromePath } : {}),
     args: [
       '--disable-gpu',
       '--disable-dev-shm-usage',
+      '--start-minimized',
       '--no-sandbox',
       '--disable-setuid-sandbox',
     ],
   },
 });
+
+function markWhatsappReady(source) {
+  if (whatsappReady) return;
+  whatsappReady = true;
+  console.log(`✅ Robô de reservas conectado e pronto (${source})`);
+  startQueuePolling();
+}
+
+async function checkWhatsappState() {
+  if (whatsappReady || !client.pupPage) return;
+
+  try {
+    const state = await client.getState();
+    if (state === 'CONNECTED') markWhatsappReady('conexão verificada');
+  } catch {
+    // O WhatsApp Web ainda está preparando seus recursos internos.
+  }
+}
+
+function startWhatsappStateMonitor() {
+  if (whatsappStateTimer) return;
+  whatsappStateTimer = setInterval(checkWhatsappState, 5000);
+}
 
 client.on('qr', (qr) => {
   console.log('\n📱 Escaneie o QR Code abaixo com o WhatsApp do Top Haus:\n');
@@ -74,12 +107,17 @@ client.on('authenticated', () => {
 });
 
 client.on('ready', () => {
-  console.log('✅ Robô de reservas conectado e pronto');
-  startQueuePolling();
+  markWhatsappReady('evento ready');
 });
 
 client.on('loading_screen', (percent, message) => {
   console.log(`⏳ ${percent}% - ${message}`);
+  if (Number(percent) >= 99) setTimeout(checkWhatsappState, 2000);
+});
+
+client.on('change_state', (state) => {
+  console.log('📡 Estado do WhatsApp:', state);
+  if (state === 'CONNECTED') markWhatsappReady('estado CONNECTED');
 });
 
 client.on('auth_failure', (message) => {
@@ -88,6 +126,7 @@ client.on('auth_failure', (message) => {
 
 client.on('disconnected', (reason) => {
   console.error('❌ WhatsApp desconectado:', reason);
+  whatsappReady = false;
   if (pollingTimer) {
     clearInterval(pollingTimer);
     pollingTimer = null;
@@ -243,6 +282,7 @@ function randomDelay() {
 async function shutdown(signal) {
   console.log(`\n🛑 Encerrando o robô (${signal})...`);
   if (pollingTimer) clearInterval(pollingTimer);
+  if (whatsappStateTimer) clearInterval(whatsappStateTimer);
   await client.destroy().catch(() => undefined);
   process.exit(0);
 }
@@ -252,5 +292,18 @@ process.on('SIGTERM', () => shutdown('SIGTERM'));
 process.on('unhandledRejection', (error) => console.error('❌ Promise não tratada:', error));
 process.on('uncaughtException', (error) => console.error('❌ Exceção não tratada:', error));
 
-console.log('🚀 Iniciando o robô de reservas Top Haus...');
-client.initialize();
+async function startRobot() {
+  console.log('🚀 Iniciando o robô de reservas Top Haus...');
+  console.log(chromePath ? `🌐 Chrome encontrado: ${chromePath}` : '🌐 Usando o navegador fornecido pelo pacote');
+
+  await db.collection('whatsappQueue').limit(1).get();
+  console.log('✅ Leitura do Firestore confirmada');
+
+  startWhatsappStateMonitor();
+  await client.initialize();
+}
+
+startRobot().catch((error) => {
+  console.error('❌ Não foi possível iniciar o robô:', error);
+  process.exitCode = 1;
+});

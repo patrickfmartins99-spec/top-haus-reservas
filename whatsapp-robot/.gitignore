@@ -2,5 +2,6 @@
 chave-firebase*.json
 .wwebjs_auth/
 .wwebjs_cache/
+.sessao-whatsapp/
 node_modules/
 *.log

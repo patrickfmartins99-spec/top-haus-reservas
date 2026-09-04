@@ -16,6 +16,8 @@ Depois da autenticação, a sessão fica salva somente nesse computador. Nas pr�
 
 No Windows, mantenha aberta a janela do WhatsApp Web iniciada pelo robô. O modo invisível pode ficar preso em 100% sem concluir o estado de pronto.
 
+No uso diário, abra o CMD, entre na pasta do robô e execute `node index.js`. A sessão persistente fica em `.sessao-whatsapp` e é separada do WhatsApp Web normal e do robô de Fidelidade.
+
 ## Recuperação de mensagens
 
 O robô consulta o Firestore por REST a cada 2 segundos, evitando depender de conexões contínuas que algumas redes bloqueiam. Por padrão, ele recupera mensagens pendentes criadas nas últimas 24 horas. Pendências mais antigas são marcadas como `ignored`, evitando o envio tardio de testes antigos.
