@@ -1,6 +1,7 @@
 import { FieldValue } from 'firebase-admin/firestore';
 import { NextResponse } from 'next/server';
 
+import { normalizePhoto } from '@/lib/firebase/account-management';
 import { requireAdmin } from '@/lib/auth/admin-request';
 import {
   isValidUsername,
@@ -45,13 +46,15 @@ export async function POST(request: Request) {
   const password = typeof payload?.password === 'string' ? payload.password : '';
   const role = payload?.role;
 
-  if (displayName.length < 2 || !isValidUsername(username) || password.length < 8 || !isRole(role)) {
+  if (displayName.length < 2 || displayName.length > 80 || !isValidUsername(username) || password.length < 8 || password.length > 128 || password !== payload?.confirmPassword || !isRole(role)) {
     return NextResponse.json({ error: 'Preencha nome, usuário, senha de ao menos 8 caracteres e permissão.' }, { status: 400 });
   }
 
   const database = getAdminDatabase();
   if (!database) return NextResponse.json({ error: 'Firebase não configurado.' }, { status: 503 });
 
+  let photo = '';
+  try { photo = payload?.photo ? await normalizePhoto(payload.photo) : ''; } catch { return NextResponse.json({ error: 'Foto inválida.' }, { status: 400 }); }
   let createdUid = '';
   try {
     const user = await context.authentication.createUser({
@@ -69,8 +72,9 @@ export async function POST(request: Request) {
     });
 
     const batch = database.batch();
+    if (photo) batch.set(database.collection('staffProfilePhotos').doc(user.uid), { data: photo, updatedAt: FieldValue.serverTimestamp() });
     batch.set(database.collection('staff').doc(user.uid), {
-      username: username.toLowerCase(),
+      username: username.trim().toLowerCase(),
       displayName,
       role,
       active: true,
@@ -83,7 +87,7 @@ export async function POST(request: Request) {
       actorId: context.decodedToken.uid,
       action: 'staff_created',
       targetId: user.uid,
-      changes: { username: username.toLowerCase(), displayName, role },
+      changes: { username: username.trim().toLowerCase(), displayName, role },
       createdAt: FieldValue.serverTimestamp(),
     });
     await batch.commit();

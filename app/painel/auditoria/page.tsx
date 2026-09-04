@@ -37,6 +37,9 @@ const actionLabels: Record<string, string> = {
   waitlist_status_changed: 'Alterou situação da fila',
   staff_created: 'Criou um colaborador',
   staff_updated: 'Alterou um colaborador',
+  staff_profile_updated: 'Atualizou a própria conta',
+  staff_deleted: 'Excluiu um acesso',
+  staff_deletion_requested: 'Solicitou exclusão de acesso',
   settings_updated: 'Alterou as configurações',
 };
 

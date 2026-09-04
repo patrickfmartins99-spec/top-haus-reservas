@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 
-import { requireStaff } from '@/lib/auth/staff-request';
+import { requireAdmin } from '@/lib/auth/admin-request';
 import { getAdminDatabase } from '@/lib/firebase/admin';
 
 function serializeTimestamp(value: unknown) {
@@ -11,8 +11,8 @@ function serializeTimestamp(value: unknown) {
 }
 
 export async function GET(request: Request) {
-  const context = await requireStaff(request);
-  if (!context) return NextResponse.json({ error: 'Acesso restrito à equipe.' }, { status: 403 });
+  const context = await requireAdmin(request);
+  if (!context) return NextResponse.json({ error: 'Acesso restrito ao administrador.' }, { status: 403 });
 
   const database = getAdminDatabase();
   if (!database) return NextResponse.json({ error: 'Firebase não configurado.' }, { status: 503 });

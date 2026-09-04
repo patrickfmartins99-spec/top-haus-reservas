@@ -1,4 +1,5 @@
 'use client';
+import Image from 'next/image';
 
 import type { ReactNode } from 'react';
 import { useEffect, useState } from 'react';
@@ -8,7 +9,6 @@ import { onAuthStateChanged, signOut } from 'firebase/auth';
 import {
   Bell,
   CalendarDays,
-  ChevronDown,
   History,
   LayoutDashboard,
   ListOrdered,
@@ -20,13 +20,14 @@ import {
 } from 'lucide-react';
 
 import { StaffPushControls, removeStaffPush } from '@/components/staff-push-controls';
+import { StaffSession, type StaffProfile } from '@/components/staff-session';
 import { BrandLogo } from '@/components/brand-logo';
 import { buttonVariants } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverHeader, PopoverTitle, PopoverTrigger } from '@/components/ui/popover';
 import { getFirebaseClient } from '@/lib/firebase/client';
 
 const navigation = [
-  { icon: LayoutDashboard, label: 'Visão geral', href: '/painel' },
+  { icon: LayoutDashboard, label: 'Painel geral', href: '/painel' },
   { icon: CalendarDays, label: 'Reservas', href: '/painel/reservas' },
   { icon: ListOrdered, label: 'Fila de espera', href: '/painel/fila' },
   { icon: MessageCircle, label: 'Mensagens', href: '/painel/mensagens' },
@@ -44,6 +45,9 @@ export function StaffShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const [checkingSession, setCheckingSession] = useState(true);
+  const [profile,setProfile] = useState<StaffProfile|null>(null);
+  const [sessionError,setSessionError] = useState('');
+  async function refreshProfile() { const user=getFirebaseClient()?.auth.currentUser;if(!user)return;const response=await fetch('/api/conta',{headers:{Authorization:'Bearer '+await user.getIdToken()}});const data=await response.json();if(!response.ok)throw new Error(data.error);setProfile(data.profile);setDisplayName(data.profile.displayName); }
   const [displayName, setDisplayName] = useState('Colaborador');
   const [loggingOut, setLoggingOut] = useState(false);
   const [notifications, setNotifications] = useState<Array<{ id: string; title: string; description: string; href: string }>>([]);
@@ -55,12 +59,12 @@ export function StaffShell({ children }: { children: ReactNode }) {
       return () => window.clearTimeout(timeout);
     }
 
-    return onAuthStateChanged(firebase.auth, (user) => {
+    return onAuthStateChanged(firebase.auth, async (user) => {
       if (!user) {
         router.replace('/entrar');
         return;
       }
-      setDisplayName(user.displayName || 'Colaborador');
+      try { await refreshProfile(); } catch { setSessionError('Não foi possível verificar seu acesso. Atualize a página ou entre novamente.'); }
       setCheckingSession(false);
     });
   }, [router]);
@@ -109,10 +113,14 @@ export function StaffShell({ children }: { children: ReactNode }) {
     );
   }
 
+  if(sessionError||!profile)return <div className="p-8"><p role="alert">{sessionError||'Acesso indisponível.'}</p><button onClick={handleLogout}>Voltar à entrada</button></div>;
+  const adminOnly=['/painel/usuarios','/painel/auditoria'];
+  if(profile.role!=='admin' && adminOnly.some(path=>pathname.startsWith(path)))return <div className="p-8"><p>Área exclusiva do administrador.</p><Link href="/painel">Voltar às reservas de hoje</Link></div>;
+  const visibleNavigation=navigation.filter(item=>profile.role==='admin'||['/painel','/painel/reservas','/painel/fila'].includes(item.href));
   const initials = displayName.split(' ').filter(Boolean).slice(0, 2).map((part) => part[0]).join('').toUpperCase() || 'TH';
 
   return (
-    <main className="min-h-screen bg-[#efede8] text-haus-ink">
+    <StaffSession.Provider value={{profile,refresh:refreshProfile}}><main className="min-h-screen bg-[#efede8] text-haus-ink">
       <div className="grid min-h-screen lg:grid-cols-[252px_1fr]">
         <aside className="hidden border-r border-white/10 bg-black px-4 py-6 text-white lg:flex lg:flex-col">
           <Link href="/painel" className="flex items-center gap-3 px-2" aria-label="Ir para a visão geral">
@@ -121,7 +129,7 @@ export function StaffShell({ children }: { children: ReactNode }) {
           </Link>
 
           <nav className="mt-10 space-y-1 text-sm" aria-label="Navegação principal">
-            {navigation.map(({ icon: Icon, label, href }) => {
+            {visibleNavigation.map(({ icon: Icon, label, href }) => {
               const active = isActive(pathname, href);
               return (
                 <Link key={href} href={href} aria-current={active ? 'page' : undefined} className={`flex items-center gap-3 rounded-lg px-3 py-2.5 transition ${active ? 'bg-[#8c4b28] text-white' : 'text-white/80 hover:bg-white/10 hover:text-white'}`}>
@@ -139,8 +147,8 @@ export function StaffShell({ children }: { children: ReactNode }) {
         </aside>
 
         <section className="min-w-0">
-          <header className="flex h-20 items-center justify-between border-b border-black/7 bg-white px-5 sm:px-8">
-            <div><p className="text-xs font-medium text-haus-ink/45">Painel da equipe</p><p className="font-heading text-xl font-bold">Top Haus Reservas</p></div>
+          <header className="flex h-20 items-center justify-between border-b border-black/7 bg-white px-3 sm:px-8">
+            <div><p className="text-xs font-medium text-haus-ink/45">Painel da equipe</p><p className="font-heading text-base font-bold sm:text-xl">Top Haus Reservas</p></div>
             <div className="flex items-center gap-2">
               <button onClick={handleLogout} disabled={loggingOut} aria-label="Sair da conta" className="rounded-lg p-2 lg:hidden"><LogOut className="size-4" /></button>
               <Popover>
@@ -157,12 +165,12 @@ export function StaffShell({ children }: { children: ReactNode }) {
                   </div>
                 </PopoverContent>
               </Popover>
-              <div className="hidden items-center gap-2 rounded-lg border border-black/8 px-3 py-2 text-sm sm:flex"><span className="grid size-7 place-items-center rounded-full bg-haus-terracotta text-xs font-bold text-white">{initials}</span><span className="max-w-36 truncate">{displayName}</span><ChevronDown className="size-3 text-black/40" /></div>
+              <Link href="/painel/configuracoes" aria-label="Configurações da minha conta" className="flex items-center gap-2 rounded-lg border border-black/15 p-2"><span className="grid size-8 shrink-0 place-items-center overflow-hidden rounded-full bg-haus-terracotta text-xs font-bold text-white">{profile.photo?<Image unoptimized width={32} height={32} src={profile.photo} alt="" className="size-full object-cover"/>:initials}</span><span className="hidden max-w-24 truncate text-sm sm:inline">{displayName}</span><Settings className="size-4"/></Link>
             </div>
           </header>
 
-          <nav className="flex gap-2 overflow-x-auto border-b border-black/7 bg-white px-5 pb-3 lg:hidden" aria-label="Navegação do painel">
-            {navigation.map(({ label, href }) => {
+          <nav className="flex flex-wrap gap-2 border-b border-black/7 bg-white px-3 pb-3 lg:hidden" aria-label="Navegação do painel">
+            {visibleNavigation.map(({ label, href }) => {
               const active = isActive(pathname, href);
               return <Link key={href} href={href} aria-current={active ? 'page' : undefined} className={`whitespace-nowrap rounded-full px-4 py-2 text-xs font-bold transition ${active ? 'bg-black text-white' : 'bg-black/5 text-black/60 hover:bg-black/10'}`}>{label}</Link>;
             })}
@@ -171,6 +179,6 @@ export function StaffShell({ children }: { children: ReactNode }) {
           {children}
         </section>
       </div>
-    </main>
+    </main></StaffSession.Provider>
   );
 }

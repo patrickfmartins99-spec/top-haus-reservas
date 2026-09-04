@@ -14,6 +14,10 @@ const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }
 const reservation = { id: 'teste-ui', customerName: 'Mariana Teste', whatsapp: '47999990000', partySize: 4, service: 'rodizio', serviceDate: today, arrivalTime: '19:00', status: 'confirmed', source: 'customer_web', notes: '', tableLabel: '', canModify: true, modifyDeadline: '2026-12-11T22:00:00Z', lateToleranceMinutes: 10, restaurantWhatsapp: '' };
 const settings = { lunchArrivalLimit: '11:30', dinnerArrivalLimit: '19:00', minAdvanceHours: 24, maxBookingMonths: 12, capacityPerService: 70, autoApprovalLimit: 20, lateToleranceMinutes: 10, restaurantWhatsapp: '', whatsappMode: 'assisted' };
 let deleted = false, savedTable = false;
+let testRole='admin';
+let profile={uid:'staff-test',username:'stafftest',displayName:'Equipe Teste',photo:''};
+let editedUser=false;
+const teamUser={uid:'another',username:'colaborador',displayName:'Colaborador Teste',role:'staff',disabled:false};
 const message = { id: 'msg-test', title: 'Reserva confirmada', customerName: reservation.customerName, whatsapp: reservation.whatsapp, message: 'Olá, Mariana! Sua reserva está confirmada. Estamos esperando vocês no Top Haus.', warning: '', createdAt: new Date().toISOString() };
 const jwt = `${Buffer.from('{}').toString('base64url')}.${Buffer.from(JSON.stringify({ sub: 'staff-test', user_id: 'staff-test', email: 'staff@example.com', iat: Math.floor(Date.now()/1000), exp: Math.floor(Date.now()/1000)+3600, auth_time: Math.floor(Date.now()/1000), firebase: { sign_in_provider: 'password' } })).toString('base64url')}.test`;
 page.on('request', async (request) => {
@@ -23,9 +27,14 @@ page.on('request', async (request) => {
     if (url.pathname.includes('signInWithPassword')) return reply({ idToken: jwt, refreshToken: 'test-refresh', expiresIn: '3600', localId: 'staff-test', email: 'staff@example.com', registered: true, displayName: 'Equipe Teste' });
     return reply({ users: [{ localId: 'staff-test', email: 'staff@example.com', displayName: 'Equipe Teste', providerUserInfo: [{ providerId: 'password', email: 'staff@example.com', federatedId: 'staff@example.com' }] }] });
   }
+  if(url.hostname==='securetoken.googleapis.com')return reply({access_token:jwt,id_token:jwt,refresh_token:'test-refresh',expires_in:'3600',user_id:'staff-test',project_id:'test'});
   if (url.hostname !== 'localhost') return request.abort();
   if (!url.pathname.startsWith('/api/')) return request.continue();
   const body = request.postData() ? JSON.parse(request.postData()) : {};
+  if(url.pathname==='/api/conta'){if(request.method()==='PATCH'){profile={...profile,...body};return reply({ok:true,signInAgain:false});}return reply({profile:{...profile,role:testRole}});}
+  if(url.pathname==='/api/configuracoes')return reply({settings});
+  if(url.pathname==='/api/admin/usuarios/another'){if(request.method()==='PATCH'){editedUser=true;Object.assign(teamUser,body);return reply({ok:true});}return reply({photo:''});}
+  if(url.pathname==='/api/admin/usuarios')return reply({users:[teamUser]});
   if (url.pathname === '/api/configuracoes/publicas') return reply({ settings });
   if (url.pathname === '/api/status') return reply({ firebase: 'connected' });
   if (url.pathname === '/api/reservas' && request.method() === 'GET') return reply({ reservations: deleted ? [] : [reservation] });
@@ -59,6 +68,8 @@ try {
   await page.keyboard.press('Escape');
   await page.waitForSelector('input[aria-label="Mesa de Mariana Teste"]');
   await page.type('input[aria-label="Mesa de Mariana Teste"]', '12 + 13'); await page.click('button[aria-label="Salvar mesa de Mariana Teste"]'); await waitText('Mesa salva.'); assert.ok(savedTable);
+  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>window.innerWidth),false);
+  await page.screenshot({path:new URL('cards-mobile.png',output).pathname.replace(/^\/(\w:)/,'$1'),fullPage:true});
   await page.setViewport({ width: 1440, height: 1000 });
   await page.screenshot({ path: new URL('painel-mesa.png', output).pathname.replace(/^\/(\w:)/, '$1'), fullPage: true });
   console.log('PASS: login simulado e mesa no painel.');
@@ -70,5 +81,24 @@ try {
   await waitText('Modelos por ação'); await click('Conferir mensagem'); await waitText('Abrir WhatsApp');
   assert.ok(await page.$('[aria-label="Prévia da mensagem"]'));
   await page.screenshot({ path: new URL('mensagem-revisao.png', output).pathname.replace(/^\/(\w:)/, '$1'), fullPage: true });
+  await page.keyboard.press('Escape');
+  await page.setViewport({width:360,height:800});
+  await page.goto('http://localhost:3100/painel/usuarios',{waitUntil:'networkidle0'});
+  await waitText('Usuários da equipe'); await click('Novo usuário');
+  await page.type('#account-name','Teste Novo');await page.type('#account-username','testenovo');await page.type('#account-password','teste-senha-123');await page.type('#account-confirm','outra-senha-123');await click('Criar acesso');await waitText('As senhas precisam ser iguais.');
+  await page.keyboard.press('Escape');await click('Editar usuário');await page.waitForSelector('#account-name');
+  await page.$eval('#account-name',input=>{const set=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set;set.call(input,'Nome Alterado');input.dispatchEvent(new Event('input',{bubbles:true}));});
+  await click('Salvar alterações');await waitText('Acesso salvo com sucesso.');assert.ok(editedUser);
+  testRole='staff';
+  await page.goto('http://localhost:3100/painel/configuracoes',{waitUntil:'networkidle0'});await waitText('Minha conta');
+  assert.equal(await page.$('#account-role'),null);assert.equal(await page.$('#capacity'),null);
+  const menu=await page.$$eval('nav[aria-label="Navegação do painel"] a',links=>links.map(a=>a.textContent.trim()));
+  assert.deepEqual(menu,['Painel geral','Reservas','Fila de espera']);
+  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>window.innerWidth),false);
+  await page.screenshot({path:new URL('minha-conta-mobile.png',output).pathname.replace(/^\/(\w:)/,'$1'),fullPage:true});
+  await page.$eval('#account-name',input=>{const set=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set;set.call(input,'Meu Novo Nome');input.dispatchEvent(new Event('input',{bubbles:true}));});
+  await click('Salvar alterações');await waitText('Sua conta foi atualizada.');assert.equal(profile.displayName,'Meu Novo Nome');
+  await page.goto('http://localhost:3100/painel/usuarios',{waitUntil:'networkidle0'});await waitText('Área exclusiva do administrador.');
+  console.log('PASS: menus por cargo, bloqueio de acesso direto, edição própria/admin e confirmação de senha, sem rolagem lateral.');
   assert.deepEqual(failures, []); console.log('PASS: revisão de mensagem e zero erros de interface. Nenhum envio ou acesso real ao Firebase.');
-} finally { await browser.close(); }
+} catch(error) { console.log(await page.evaluate(()=>document.body.innerText)); console.log(failures); throw error; } finally { await browser.close(); }

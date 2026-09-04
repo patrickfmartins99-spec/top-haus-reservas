@@ -11,7 +11,9 @@ export async function requireStaff(request: Request) {
 
   try {
     const decodedToken = await authentication.verifyIdToken(token, true);
-    if (decodedToken.staff !== true) return null;
+    const user = await authentication.getUser(decodedToken.uid);
+    if (decodedToken.staff !== true || user.disabled || user.customClaims?.staff !== true) return null;
+    decodedToken.admin = user.customClaims?.admin === true;
     return { authentication, decodedToken };
   } catch {
     return null;

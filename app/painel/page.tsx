@@ -5,11 +5,10 @@ import Link from 'next/link';
 import { onAuthStateChanged } from 'firebase/auth';
 import { CalendarDays, ClipboardList, Clock3, ListOrdered, LoaderCircle, Plus, Users } from 'lucide-react';
 
-import { ReservationTable } from '@/components/reservation-table';
+import { ReservationCards } from '@/components/reservation-cards';
 import { Badge } from '@/components/ui/badge';
 import { buttonVariants } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { formatDurationClock, waitDurationMilliseconds } from '@/lib/domain/waitlist-time';
 import { getFirebaseClient } from '@/lib/firebase/client';
 
@@ -33,18 +32,7 @@ type QueueEntry = {
   calledAt: string | null;
 };
 
-const statusLabels: Record<string, string> = {
-  pending_approval: 'Aguardando aprovação',
-  confirmed: 'Confirmada',
-  presence_confirmed: 'Presença confirmada',
-  seated: 'Cliente chegou',
-};
 
-function statusClass(status: string) {
-  if (status === 'pending_approval') return 'bg-haus-gold/20 text-[#6b451c]';
-  if (status === 'presence_confirmed' || status === 'seated') return 'bg-black text-white';
-  return 'bg-[#e7e1db] text-[#4f3528]';
-}
 
 function localDate() {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(new Date());
@@ -102,34 +90,20 @@ export default function DashboardPage() {
   return (
     <div className="mx-auto max-w-[1500px] space-y-7 p-5 sm:p-8">
       <div className="flex flex-wrap items-center justify-between gap-4">
-        <div><p className="text-xs font-bold uppercase tracking-[0.16em] text-haus-terracotta">Visão geral</p><h1 className="mt-2 font-heading text-3xl font-extrabold tracking-[-0.03em]">Reservas de hoje</h1><p className="mt-1 text-sm text-haus-ink/65">Acompanhe almoço, rodízio e fila de espera em tempo real.</p></div>
+        <div><p className="text-xs font-bold uppercase tracking-[0.16em] text-haus-terracotta">Visão geral</p><h1 className="mt-2 font-heading text-3xl font-extrabold tracking-[-0.03em]">Reservas de hoje</h1><p className="mt-1 text-sm text-haus-ink/65">Atendimentos do dia em primeiro lugar. Abra uma reserva para editar ou enviar mensagens.</p></div>
         <Link href="/painel/reservas/nova" className={buttonVariants({ className: 'h-10 bg-black px-4 text-white hover:bg-black/85' })}><Plus className="size-4" /> Nova reserva</Link>
       </div>
 
-      <div className="rounded-xl border border-haus-gold/45 bg-[#f4e7d7] px-4 py-3 text-sm text-haus-ink/80"><strong>Dados reais.</strong> Esta tela agora é atualizada diretamente pelas reservas e pela fila salvas no Firebase.</div>
       {error ? <p className="rounded-xl bg-destructive/10 px-4 py-3 text-sm font-medium text-destructive" role="alert">{error}</p> : null}
 
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        {[
-          { label: 'Pessoas reservadas', value: reservedPeople, detail: 'almoço + rodízio de hoje', icon: Users },
-          { label: 'Reservas', value: todayReservations.length, detail: `${confirmedReservations.length} confirmadas`, icon: ClipboardList },
-          { label: 'Aguardando aprovação', value: pendingReservations.length, detail: pendingReservations.length ? `${pendingReservations.reduce((sum, item) => sum + item.partySize, 0)} pessoas` : 'nenhuma pendência', icon: Clock3 },
-          { label: 'Fila de espera', value: activeQueue.length, detail: activeQueue.length ? `${activeQueue.reduce((sum, item) => sum + item.partySize, 0)} pessoas` : 'fila vazia', icon: ListOrdered },
-        ].map(({ label, value, detail, icon: Icon }) => (
-          <Card key={label} className="gap-3 bg-white ring-black/7"><CardHeader className="flex-row items-center justify-between"><p className="text-sm text-haus-ink/65">{label}</p><span className="grid size-8 place-items-center rounded-lg bg-[#eadcd2] text-haus-terracotta"><Icon className="size-4" /></span></CardHeader><CardContent><p className="font-heading text-3xl font-bold">{loading ? '—' : value}</p><p className="mt-1 text-xs font-medium text-haus-ink/65">{detail}</p></CardContent></Card>
-        ))}
-      </div>
 
-      <div className="grid gap-5 xl:grid-cols-[1fr_340px]">
+      <div className="grid min-w-0 gap-5 xl:grid-cols-[minmax(0,1fr)_300px]">
         <Card className="bg-white ring-black/7">
           <CardHeader className="flex-row items-center justify-between border-b border-black/6"><div><CardTitle className="font-heading text-xl font-bold">Atendimentos de hoje</CardTitle><p className="mt-1 text-xs font-medium text-haus-ink/65">Reservas ativas dos dois serviços</p></div><Badge variant="outline">{todayReservations.length}</Badge></CardHeader>
           <CardContent>
             {loading ? <p className="flex items-center justify-center gap-2 py-12 text-sm text-black/65"><LoaderCircle className="size-4 animate-spin" /> Carregando dados...</p> : null}
             {!loading && todayReservations.length === 0 ? <p className="py-12 text-center text-sm text-black/65">Nenhuma reserva registrada para hoje.</p> : null}
-            {!loading && todayReservations.length > 0 ? <Table><TableHeader><TableRow><TableHead>Serviço</TableHead><TableHead>Horário</TableHead><TableHead>Cliente</TableHead><TableHead>Pessoas</TableHead><TableHead>Mesa</TableHead><TableHead>Situação</TableHead></TableRow></TableHeader><TableBody>
-              {todayReservations.map((reservation) => <TableRow key={reservation.id}><TableCell>{reservation.service === 'almoco' ? 'Almoço' : 'Rodízio'}</TableCell><TableCell className="font-semibold">{reservation.arrivalTime}</TableCell><TableCell><p className="font-semibold">{reservation.customerName}</p><p className="font-mono text-[11px] font-semibold text-black/65">{reservation.id}</p></TableCell><TableCell>{reservation.partySize}</TableCell><TableCell><ReservationTable id={reservation.id} initialValue={reservation.tableLabel} customerName={reservation.customerName} /></TableCell><TableCell><Badge className={statusClass(reservation.status)}>{statusLabels[reservation.status] ?? reservation.status}</Badge></TableCell></TableRow>)}
-            </TableBody></Table> : null}
-            <Link href="/painel/reservas" className={buttonVariants({ variant: 'outline', className: 'mt-5 w-full' })}><CalendarDays /> Ver todas as reservas</Link>
+            {!loading && todayReservations.length > 0 ? <ReservationCards items={todayReservations} actions={r=><Link href={'/painel/reservas?busca='+r.id} className={buttonVariants({variant:'outline',className:'w-full'})}>Abrir reserva</Link>}/> : null}            <Link href="/painel/reservas" className={buttonVariants({ variant: 'outline', className: 'mt-5 w-full' })}><CalendarDays /> Ver todas as reservas</Link>
           </CardContent>
         </Card>
 
@@ -142,6 +116,17 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
       </div>
+      <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+        {[
+          { label: 'Pessoas reservadas', value: reservedPeople, detail: 'almoço + rodízio de hoje', icon: Users },
+          { label: 'Reservas', value: todayReservations.length, detail: `${confirmedReservations.length} confirmadas`, icon: ClipboardList },
+          { label: 'Aguardando aprovação', value: pendingReservations.length, detail: pendingReservations.length ? `${pendingReservations.reduce((sum, item) => sum + item.partySize, 0)} pessoas` : 'nenhuma pendência', icon: Clock3 },
+          { label: 'Fila de espera', value: activeQueue.length, detail: activeQueue.length ? `${activeQueue.reduce((sum, item) => sum + item.partySize, 0)} pessoas` : 'fila vazia', icon: ListOrdered },
+        ].map(({ label, value, detail, icon: Icon }) => (
+          <Card key={label} className="gap-3 bg-white ring-black/7"><CardHeader className="flex-row items-center justify-between"><p className="text-sm text-haus-ink/65">{label}</p><span className="grid size-8 place-items-center rounded-lg bg-[#eadcd2] text-haus-terracotta"><Icon className="size-4" /></span></CardHeader><CardContent><p className="font-heading text-3xl font-bold">{loading ? '—' : value}</p><p className="mt-1 text-xs font-medium text-haus-ink/65">{detail}</p></CardContent></Card>
+        ))}
+      </div>
+
     </div>
   );
 }
