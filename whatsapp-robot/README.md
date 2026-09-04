@@ -18,6 +18,8 @@ No Windows, mantenha aberta a janela do WhatsApp Web iniciada pelo robô. O modo
 
 No uso diário, abra o CMD, entre na pasta do robô e execute `node index.js`. A sessão persistente fica em `.sessao-whatsapp` e é separada do WhatsApp Web normal e do robô de Fidelidade.
 
+O estado CONNECTED sozinho não libera a fila. O robô verifica sincronização e as funções de envio antes de consultar, assumir e enviar mensagens. Se os auxiliares não carregarem, tenta inicializá-los com o código da versão instalada da biblioteca e verifica novamente. Falhas anteriores não são reenviadas automaticamente.
+
 ## Recuperação de mensagens
 
 O robô consulta o Firestore por REST a cada 2 segundos, evitando depender de conexões contínuas que algumas redes bloqueiam. Por padrão, ele recupera mensagens pendentes criadas nas últimas 24 horas. Pendências mais antigas são marcadas como `ignored`, evitando o envio tardio de testes antigos.

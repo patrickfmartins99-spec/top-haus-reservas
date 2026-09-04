@@ -6,9 +6,11 @@ const path = require('node:path');
 const admin = require('firebase-admin');
 const qrcode = require('qrcode-terminal');
 const { Client, LocalAuth } = require('whatsapp-web.js');
+const { LoadUtils } = require('whatsapp-web.js/src/util/Injected/Utils');
+const { createReadinessGate } = require('./whatsapp-readiness');
 const { buildMessage, normalizeBrazilianPhone, positiveNumber } = require('./messages');
 
-const ROBOT_VERSION = '2.0.0';
+const ROBOT_VERSION = '2.0.1';
 const ROBOT_ID = `${os.hostname()}-${process.pid}`;
 const SEND_DELAY_MIN_MS = positiveNumber(process.env.SEND_DELAY_MIN_MS, 5000);
 const SEND_DELAY_MAX_MS = Math.max(SEND_DELAY_MIN_MS, positiveNumber(process.env.SEND_DELAY_MAX_MS, 10000));
@@ -74,6 +76,11 @@ const client = new Client({
   },
 });
 
+const checkSendReadiness = createReadinessGate({
+  client, loadUtils: LoadUtils,
+  warn: (message) => console.warn(`⚠️ ${message}`),
+});
+
 function markWhatsappReady(source) {
   if (whatsappReady) return;
   whatsappReady = true;
@@ -82,13 +89,11 @@ function markWhatsappReady(source) {
 }
 
 async function checkWhatsappState() {
-  if (whatsappReady || !client.pupPage) return;
-
-  try {
-    const state = await client.getState();
-    if (state === 'CONNECTED') markWhatsappReady('conexão verificada');
-  } catch {
-    // O WhatsApp Web ainda está preparando seus recursos internos.
+  if (await checkSendReadiness()) {
+    markWhatsappReady('funções de envio verificadas');
+  } else {
+    if (whatsappReady) console.warn('⏸️ Envio pausado: aguardando inicialização completa do WhatsApp.');
+    whatsappReady = false;
   }
 }
 
@@ -107,7 +112,7 @@ client.on('authenticated', () => {
 });
 
 client.on('ready', () => {
-  markWhatsappReady('evento ready');
+  checkWhatsappState();
 });
 
 client.on('loading_screen', (percent, message) => {
@@ -117,7 +122,7 @@ client.on('loading_screen', (percent, message) => {
 
 client.on('change_state', (state) => {
   console.log('📡 Estado do WhatsApp:', state);
-  if (state === 'CONNECTED') markWhatsappReady('estado CONNECTED');
+  if (state === 'CONNECTED') checkWhatsappState();
 });
 
 client.on('auth_failure', (message) => {
@@ -152,6 +157,7 @@ async function pollQueue() {
   polling = true;
 
   try {
+    if (!(await checkSendReadiness())) return;
     const snapshot = await db.collection('whatsappQueue')
       .where('status', '==', 'pending')
       .limit(100)
@@ -216,6 +222,10 @@ async function claimEvent(id) {
 async function processQueue() {
   if (processing || queue.length === 0) return;
   processing = true;
+  if (!(await checkSendReadiness())) {
+    processing = false;
+    return;
+  }
 
   const queuedEvent = queue.shift();
   let claimed = null;
@@ -243,6 +253,11 @@ async function processQueue() {
     const contact = await client.getNumberId(destination);
     if (!contact) throw new Error(`Número final ${destination.slice(-4)} não encontrado no WhatsApp.`);
 
+    if (!(await checkSendReadiness())) {
+      const error = new Error('WhatsApp ainda não está pronto; mensagem mantida pendente.');
+      error.code = 'WHATSAPP_NOT_READY';
+      throw error;
+    }
     await client.sendMessage(contact._serialized, message);
     await claimed.reference.update({
       status: 'sent',
@@ -256,7 +271,7 @@ async function processQueue() {
     console.error(`❌ Falha no evento ${queuedEvent.id}:`, error.message);
     if (claimed?.reference && claimed.data) {
       await claimed.reference.update({
-        status: 'failed',
+        status: error.code === 'WHATSAPP_NOT_READY' ? 'pending' : 'failed',
         error: String(error.message || error).slice(0, 500),
         processedAt: admin.firestore.FieldValue.serverTimestamp(),
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),

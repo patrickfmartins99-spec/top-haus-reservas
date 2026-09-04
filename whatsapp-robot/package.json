@@ -7,7 +7,7 @@
   "scripts": {
     "start": "node index.js",
     "check": "node --check index.js && node --check messages.js",
-    "test": "node --test messages.test.js",
+    "test": "node --test messages.test.js whatsapp-readiness.test.js",
     "test:firebase": "node test-firebase.js"
   },
   "dependencies": {
