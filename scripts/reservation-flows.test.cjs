@@ -3,6 +3,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const crypto = require('node:crypto');
 const ts = require('typescript');
 const root = path.resolve(__dirname, '..');
 let db, staff;
@@ -12,7 +13,14 @@ class FakeDatabase {
   data = new Map();
   collection(name) {
     const self = this;
-    return {
+    const query = {
+      where() {
+        return query;
+      },
+      limit() {
+        return query;
+      },
+      get: async () => ({ docs: [], empty: true, size: 0 }),
       doc(id = `fake-${++serial}`) {
         const key = `${name}/${id}`;
         return {
@@ -28,6 +36,7 @@ class FakeDatabase {
         };
       },
     };
+    return query;
   }
   async runTransaction(callback) {
     const pending = [];
@@ -117,6 +126,7 @@ function load(file) {
   return module.exports;
 }
 const domain = load('lib/domain/reservations.ts');
+const specialDates = load('lib/domain/special-dates.ts');
 const outcomes = load('lib/domain/service-outcomes.ts');
 const reporting = load('lib/domain/reporting.ts');
 const messages = load('lib/whatsapp.ts');
@@ -215,6 +225,22 @@ test('datas impossíveis são rejeitadas', () => {
     domain.isReservationInput({ ...input, serviceDate: '2026-02-31' }),
     false,
   );
+});
+test('exceção normaliza abertura, capacidade, horários e aviso', () => {
+  const normalized = specialDates.normalizeSpecialDate({
+    serviceDate: '2026-12-25',
+    service: 'rodizio',
+    mode: 'open',
+    bookingPaused: true,
+    capacityLimit: 50,
+    arrivalTimes: ['19:30', '18:30'],
+    customerNotice: ' Horário especial de Natal. ',
+  });
+  assert.equal(normalized.id, '2026-12-25_rodizio');
+  assert.deepEqual(normalized.arrivalTimes, ['18:30', '19:30']);
+  assert.equal(normalized.capacityLimit, 50);
+  assert.equal(normalized.bookingPaused, true);
+  assert.equal(normalized.customerNotice, 'Horário especial de Natal.');
 });
 test('exclusão libera capacidade uma única vez e mantém auditoria e sino', async () => {
   fixture();
@@ -356,6 +382,34 @@ test('criação não aceita campos administrativos injetados pelo cliente', asyn
   )[1];
   assert.equal(notification.title, 'Nova reserva pelo site');
   assert.match(notification.description, /Cliente Teste · 4 pessoas/);
+});
+test('criação bloqueia reserva repetida para WhatsApp, data e serviço', async () => {
+  fixture();
+  const key = crypto
+    .createHash('sha256')
+    .update(`${input.whatsapp}|${input.serviceDate}|${input.service}`)
+    .digest('hex');
+  db.data.set(`reservationDedup/${key}`, { reservationId: 'r1' });
+  const response = await createRoute.POST(request('POST', input));
+  assert.equal(response.status, 409);
+  assert.equal((await response.json()).duplicate, true);
+});
+test('criação respeita capacidade e horários definidos para uma data especial', async () => {
+  fixture();
+  db.data.set('specialDates/2026-12-12_rodizio', {
+    isOpen: true,
+    capacityLimit: 12,
+    arrivalTimes: ['19:30'],
+  });
+  const response = await createRoute.POST(
+    request('POST', {
+      ...input,
+      whatsapp: '47988880000',
+      arrivalTime: '19:00',
+    }),
+  );
+  assert.equal(response.status, 409);
+  assert.match((await response.json()).error, /horário escolhido/);
 });
 test('criação de rodízio após prazo é barrada no servidor', async () => {
   fixture();

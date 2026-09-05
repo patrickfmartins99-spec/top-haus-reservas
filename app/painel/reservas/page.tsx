@@ -39,6 +39,7 @@ import {
   RESERVATION_NO_SHOW_REASONS,
 } from '@/lib/domain/service-outcomes';
 import { getFirebaseClient } from '@/lib/firebase/client';
+import type { SpecialDateException } from '@/lib/domain/special-dates';
 
 type Reservation = {
   id: string;
@@ -80,6 +81,7 @@ export default function ReservationsPage() {
   const searchParams = useSearchParams();
   const createdId = searchParams.get('criada');
   const [reservations, setReservations] = useState<Reservation[]>([]);
+  const [exceptions, setExceptions] = useState<SpecialDateException[]>([]);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -143,7 +145,13 @@ export default function ReservationsPage() {
       if (!user) return;
       setCurrentUser(user);
       try {
-        await refresh(user);
+        const [, publicSettings] = await Promise.all([
+          refresh(user),
+          fetch('/api/configuracoes/publicas').then((response) =>
+            response.json(),
+          ),
+        ]);
+        setExceptions(publicSettings.exceptions ?? []);
       } catch (caughtError) {
         setError(
           caughtError instanceof Error
@@ -196,9 +204,36 @@ export default function ReservationsPage() {
   function changeDraftService(service: string) {
     setEditingReservation((current) =>
       current
-        ? { ...current, service, arrivalTime: times[service][0] }
+        ? {
+            ...current,
+            service,
+            arrivalTime:
+              exceptions.find(
+                (item) =>
+                  item.serviceDate === current.serviceDate &&
+                  item.service === service,
+              )?.arrivalTimes[0] ?? times[service][0],
+          }
         : current,
     );
+  }
+
+  function changeDraftDate(serviceDate: string) {
+    setEditingReservation((current) => {
+      if (!current) return current;
+      const available = exceptions.find(
+        (item) =>
+          item.serviceDate === serviceDate && item.service === current.service,
+      )?.arrivalTimes;
+      const nextTimes = available?.length ? available : times[current.service];
+      return {
+        ...current,
+        serviceDate,
+        arrivalTime: nextTimes.includes(current.arrivalTime)
+          ? current.arrivalTime
+          : nextTimes[0],
+      };
+    });
   }
 
   async function saveReservation(event: React.SyntheticEvent<HTMLFormElement>) {
@@ -278,8 +313,8 @@ export default function ReservationsPage() {
         </p>
       ) : null}
 
-      <div className="grid grid-cols-3 gap-2">
-        <Card className="bg-white ring-black/7">
+      <div className="grid gap-3 sm:grid-cols-3">
+        <Card className="border border-black/10 bg-white shadow-[0_8px_24px_rgba(0,0,0,0.07)]">
           <CardContent>
             <p className="text-sm text-black/65">Reservas encontradas</p>
             <p className="mt-2 text-3xl font-extrabold">
@@ -287,7 +322,7 @@ export default function ReservationsPage() {
             </p>
           </CardContent>
         </Card>
-        <Card className="bg-white ring-black/7">
+        <Card className="border border-black/10 bg-white shadow-[0_8px_24px_rgba(0,0,0,0.07)]">
           <CardContent>
             <p className="text-sm text-black/65">Pessoas reservadas</p>
             <p className="mt-2 text-3xl font-extrabold">
@@ -304,7 +339,7 @@ export default function ReservationsPage() {
             </p>
           </CardContent>
         </Card>
-        <Card className="bg-white ring-black/7">
+        <Card className="border border-black/10 bg-white shadow-[0_8px_24px_rgba(0,0,0,0.07)]">
           <CardContent>
             <p className="text-sm text-black/65">Aguardando aprovação</p>
             <p className="mt-2 text-3xl font-extrabold">
@@ -318,7 +353,7 @@ export default function ReservationsPage() {
         </Card>
       </div>
 
-      <Card className="bg-white ring-black/7">
+      <Card className="border border-black/10 bg-white shadow-[0_12px_36px_rgba(0,0,0,0.08)]">
         <CardHeader className="gap-4 border-b border-black/7 lg:flex-row lg:items-center lg:justify-between">
           <div>
             <CardTitle className="text-xl font-bold">
@@ -515,9 +550,7 @@ export default function ReservationsPage() {
                     id="edit-reservation-date"
                     type="date"
                     value={editingReservation.serviceDate}
-                    onChange={(event) =>
-                      updateDraft('serviceDate', event.target.value)
-                    }
+                    onChange={(event) => changeDraftDate(event.target.value)}
                     required
                   />
                 </div>
@@ -547,7 +580,19 @@ export default function ReservationsPage() {
                     }
                     className="w-full"
                   >
-                    {times[editingReservation.service].map((time) => (
+                    {(exceptions.find(
+                      (item) =>
+                        item.serviceDate === editingReservation.serviceDate &&
+                        item.service === editingReservation.service,
+                    )?.arrivalTimes.length
+                      ? exceptions.find(
+                          (item) =>
+                            item.serviceDate ===
+                              editingReservation.serviceDate &&
+                            item.service === editingReservation.service,
+                        )!.arrivalTimes
+                      : times[editingReservation.service]
+                    ).map((time) => (
                       <NativeSelectOption key={time} value={time}>
                         {time}
                       </NativeSelectOption>

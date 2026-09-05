@@ -9,10 +9,14 @@ import { Button, buttonVariants } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
+import {
+  NativeSelect,
+  NativeSelectOption,
+} from '@/components/ui/native-select';
 import { Textarea } from '@/components/ui/textarea';
 import { minimumBookingDate, brazilDate } from '@/lib/domain/reservations';
 import { DEFAULT_OPERATIONAL_SETTINGS } from '@/lib/domain/operational-settings';
+import type { SpecialDateException } from '@/lib/domain/special-dates';
 import { getFirebaseClient } from '@/lib/firebase/client';
 
 type Service = 'almoco' | 'rodizio';
@@ -35,58 +39,271 @@ export default function NewReservationPage() {
   const [error, setError] = useState('');
 
   const [settings, setSettings] = useState(DEFAULT_OPERATIONAL_SETTINGS);
-  useEffect(() => { fetch('/api/configuracoes/publicas').then(async (r) => { if (r.ok) setSettings((await r.json()).settings); }).catch(() => undefined); }, []);
+  const [exceptions, setExceptions] = useState<SpecialDateException[]>([]);
+  useEffect(() => {
+    fetch('/api/configuracoes/publicas')
+      .then(async (r) => {
+        if (r.ok) {
+          const data = await r.json();
+          setSettings(data.settings);
+          setExceptions(data.exceptions ?? []);
+        }
+      })
+      .catch(() => undefined);
+  }, []);
 
+  const selectedException = exceptions.find(
+    (item) => item.serviceDate === serviceDate && item.service === service,
+  );
+  const availableTimes = selectedException?.arrivalTimes.length
+    ? selectedException.arrivalTimes
+    : times[service];
+  const monday = serviceDate
+    ? new Date(`${serviceDate}T12:00:00-03:00`).getDay() === 1
+    : false;
+  const unavailableReason =
+    selectedException?.isOpen === false
+      ? selectedException.customerNotice ||
+        'Este serviço está fechado nesta data.'
+      : selectedException?.bookingPaused
+        ? selectedException.customerNotice ||
+          'Novas reservas estão suspensas nesta data.'
+        : monday && selectedException?.isOpen !== true
+          ? 'Este serviço está fechado nesta segunda-feira.'
+          : '';
   const { minDate, maxDate } = useMemo(() => {
     const minimum = minimumBookingDate(service, settings.minAdvanceHours);
-    const maximum = new Date(); maximum.setMonth(maximum.getMonth() + settings.maxBookingMonths);
+    const maximum = new Date();
+    maximum.setMonth(maximum.getMonth() + settings.maxBookingMonths);
     return { minDate: minimum, maxDate: brazilDate(maximum) };
   }, [service, settings]);
 
   function changeService(nextService: Service) {
     setService(nextService);
-    setArrivalTime(times[nextService][0]);
+    const specialTimes = exceptions.find(
+      (item) =>
+        item.serviceDate === serviceDate && item.service === nextService,
+    )?.arrivalTimes;
+    setArrivalTime(
+      specialTimes?.length ? specialTimes[0] : times[nextService][0],
+    );
   }
 
-  async function createReservation(event: React.SyntheticEvent<HTMLFormElement>) {
+  function changeDate(nextDate: string) {
+    setServiceDate(nextDate);
+    const specialTimes = exceptions.find(
+      (item) => item.serviceDate === nextDate && item.service === service,
+    )?.arrivalTimes;
+    const nextTimes = specialTimes?.length ? specialTimes : times[service];
+    if (!nextTimes.includes(arrivalTime)) setArrivalTime(nextTimes[0] ?? '');
+  }
+
+  async function createReservation(
+    event: React.SyntheticEvent<HTMLFormElement>,
+  ) {
     event.preventDefault();
     const firebase = getFirebaseClient();
     const user = firebase?.auth.currentUser;
-    if (!user) { setError('Sua sessão expirou. Entre novamente.'); return; }
+    if (!user) {
+      setError('Sua sessão expirou. Entre novamente.');
+      return;
+    }
 
-    setSaving(true); setError('');
+    setSaving(true);
+    setError('');
     try {
       const token = await user.getIdToken();
       const response = await fetch('/api/reservas', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ customerName, whatsapp, serviceDate, service, arrivalTime, partySize: Number(partySize), notes }),
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          customerName,
+          whatsapp,
+          serviceDate,
+          service,
+          arrivalTime,
+          partySize: Number(partySize),
+          notes,
+        }),
       });
       const data = await response.json();
-      if (!response.ok) throw new Error(data.error ?? 'Não foi possível criar a reserva.');
+      if (!response.ok)
+        throw new Error(data.error ?? 'Não foi possível criar a reserva.');
       router.push(`/painel/reservas?criada=${encodeURIComponent(data.id)}`);
     } catch (caughtError) {
-      setError(caughtError instanceof Error ? caughtError.message : 'Não foi possível criar a reserva.');
-    } finally { setSaving(false); }
+      setError(
+        caughtError instanceof Error
+          ? caughtError.message
+          : 'Não foi possível criar a reserva.',
+      );
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
     <div className="mx-auto max-w-4xl space-y-6 p-5 sm:p-8">
-      <div className="flex items-center gap-4"><Link href="/painel/reservas" aria-label="Voltar para reservas" className={buttonVariants({ variant: 'outline', size: 'icon' })}><ArrowLeft /></Link><div><p className="text-xs font-bold uppercase tracking-[0.16em] text-haus-terracotta">Reservas</p><h1 className="mt-1 text-3xl font-extrabold tracking-[-0.03em]">Nova reserva</h1></div></div>
-      {error ? <p className="rounded-xl bg-destructive/10 px-4 py-3 text-sm font-medium text-destructive" role="alert">{error}</p> : null}
-      <p className="rounded-xl bg-white p-4 text-sm font-semibold">Rodízio: reservas até as 18h do dia da visita. Almoço: {settings.minAdvanceHours} horas de antecedência. Horário de Brasília.</p>
+      <div className="flex items-center gap-4">
+        <Link
+          href="/painel/reservas"
+          aria-label="Voltar para reservas"
+          className={buttonVariants({ variant: 'outline', size: 'icon' })}
+        >
+          <ArrowLeft />
+        </Link>
+        <div>
+          <p className="text-xs font-bold uppercase tracking-[0.16em] text-haus-terracotta">
+            Reservas
+          </p>
+          <h1 className="mt-1 text-3xl font-extrabold tracking-[-0.03em]">
+            Nova reserva
+          </h1>
+        </div>
+      </div>
+      {error ? (
+        <p
+          className="rounded-xl bg-destructive/10 px-4 py-3 text-sm font-medium text-destructive"
+          role="alert"
+        >
+          {error}
+        </p>
+      ) : null}
+      <p className="rounded-xl bg-white p-4 text-sm font-semibold">
+        Rodízio: reservas até as 18h do dia da visita. Almoço:{' '}
+        {settings.minAdvanceHours} horas de antecedência. Horário de Brasília.
+      </p>
       <form onSubmit={createReservation}>
-        <Card className="bg-white ring-black/7"><CardHeader className="border-b border-black/7"><CardTitle>Dados do cliente</CardTitle><p className="text-sm text-black/50">A reserva será salva no Firebase e ficará disponível para toda a equipe.</p></CardHeader><CardContent className="grid gap-5 sm:grid-cols-2">
-          <div className="space-y-2"><Label htmlFor="customer-name">Nome completo</Label><Input id="customer-name" value={customerName} onChange={(event) => setCustomerName(event.target.value)} required minLength={2} placeholder="Nome do responsável" /></div>
-          <div className="space-y-2"><Label htmlFor="customer-phone">WhatsApp</Label><Input id="customer-phone" value={whatsapp} onChange={(event) => setWhatsapp(event.target.value)} required minLength={10} inputMode="tel" placeholder="(47) 99999-9999" /></div>
-          <div className="space-y-2"><Label htmlFor="reservation-date">Data</Label><Input id="reservation-date" type="date" value={serviceDate} onChange={(event) => setServiceDate(event.target.value)} min={minDate} max={maxDate} required /></div>
-          <div className="space-y-2"><Label htmlFor="service">Serviço</Label><NativeSelect id="service" value={service} onChange={(event) => changeService(event.target.value as Service)} className="w-full"><NativeSelectOption value="almoco">Almoço — chegada até 11h30</NativeSelectOption><NativeSelectOption value="rodizio">Rodízio — chegada até 19h</NativeSelectOption></NativeSelect></div>
-          <div className="space-y-2"><Label htmlFor="arrival-time">Horário de chegada</Label><NativeSelect id="arrival-time" value={arrivalTime} onChange={(event) => setArrivalTime(event.target.value)} className="w-full">{times[service].map((time) => <NativeSelectOption key={time} value={time}>{time}</NativeSelectOption>)}</NativeSelect></div>
-          <div className="space-y-2"><Label htmlFor="party-size">Número de pessoas</Label><Input id="party-size" type="number" value={partySize} onChange={(event) => setPartySize(event.target.value)} min={1} required /></div>
-          <div className="space-y-2 sm:col-span-2"><Label htmlFor="notes">Observações</Label><Textarea id="notes" value={notes} onChange={(event) => setNotes(event.target.value)} maxLength={1000} placeholder="Aniversário, acessibilidade, pedidos especiais..." /></div>
-          <div className="rounded-xl border border-haus-gold/35 bg-[#f4e7d7] px-4 py-3 text-sm text-black/65 sm:col-span-2"><strong>Confirmação:</strong> até 20 pessoas a reserva será confirmada automaticamente. Grupos maiores ficarão aguardando aprovação.</div>
-          <div className="flex flex-wrap justify-end gap-3 sm:col-span-2"><Link href="/painel/reservas" className={buttonVariants({ variant: 'outline' })}>Cancelar</Link><Button type="submit" disabled={saving} className="bg-haus-terracotta text-white hover:bg-haus-terracotta/90">{saving ? <LoaderCircle className="animate-spin" /> : <Save />} Salvar reserva</Button></div>
-        </CardContent></Card>
+        <Card className="bg-white ring-black/7">
+          <CardHeader className="border-b border-black/7">
+            <CardTitle>Dados do cliente</CardTitle>
+            <p className="text-sm text-black/50">
+              A reserva será salva no Firebase e ficará disponível para toda a
+              equipe.
+            </p>
+          </CardHeader>
+          <CardContent className="grid gap-5 sm:grid-cols-2">
+            <div className="space-y-2">
+              <Label htmlFor="customer-name">Nome completo</Label>
+              <Input
+                id="customer-name"
+                value={customerName}
+                onChange={(event) => setCustomerName(event.target.value)}
+                required
+                minLength={2}
+                placeholder="Nome do responsável"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="customer-phone">WhatsApp</Label>
+              <Input
+                id="customer-phone"
+                value={whatsapp}
+                onChange={(event) => setWhatsapp(event.target.value)}
+                required
+                minLength={10}
+                inputMode="tel"
+                placeholder="(47) 99999-9999"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="reservation-date">Data</Label>
+              <Input
+                id="reservation-date"
+                type="date"
+                value={serviceDate}
+                onChange={(event) => changeDate(event.target.value)}
+                min={minDate}
+                max={maxDate}
+                required
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="service">Serviço</Label>
+              <NativeSelect
+                id="service"
+                value={service}
+                onChange={(event) =>
+                  changeService(event.target.value as Service)
+                }
+                className="w-full"
+              >
+                <NativeSelectOption value="almoco">
+                  Almoço — chegada até 11h30
+                </NativeSelectOption>
+                <NativeSelectOption value="rodizio">
+                  Rodízio — chegada até 19h
+                </NativeSelectOption>
+              </NativeSelect>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="arrival-time">Horário de chegada</Label>
+              <NativeSelect
+                id="arrival-time"
+                value={arrivalTime}
+                onChange={(event) => setArrivalTime(event.target.value)}
+                className="w-full"
+              >
+                {availableTimes.map((time) => (
+                  <NativeSelectOption key={time} value={time}>
+                    {time}
+                  </NativeSelectOption>
+                ))}
+              </NativeSelect>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="party-size">Número de pessoas</Label>
+              <Input
+                id="party-size"
+                type="number"
+                value={partySize}
+                onChange={(event) => setPartySize(event.target.value)}
+                min={1}
+                required
+              />
+            </div>
+            <div className="space-y-2 sm:col-span-2">
+              <Label htmlFor="notes">Observações</Label>
+              <Textarea
+                id="notes"
+                value={notes}
+                onChange={(event) => setNotes(event.target.value)}
+                maxLength={1000}
+                placeholder="Aniversário, acessibilidade, pedidos especiais..."
+              />
+            </div>
+            <div className="rounded-xl border border-haus-gold/35 bg-[#f4e7d7] px-4 py-3 text-sm text-black/65 sm:col-span-2">
+              <strong>Confirmação:</strong> até 20 pessoas a reserva será
+              confirmada automaticamente. Grupos maiores ficarão aguardando
+              aprovação.
+            </div>
+            {selectedException?.customerNotice || unavailableReason ? (
+              <p
+                className={`rounded-xl border px-4 py-3 text-sm font-semibold sm:col-span-2 ${unavailableReason ? 'border-red-200 bg-red-50 text-red-800' : 'border-haus-gold/35 bg-[#f4e7d7] text-[#68401f]'}`}
+              >
+                {selectedException?.customerNotice || unavailableReason}
+              </p>
+            ) : null}
+            <div className="flex flex-wrap justify-end gap-3 sm:col-span-2">
+              <Link
+                href="/painel/reservas"
+                className={buttonVariants({ variant: 'outline' })}
+              >
+                Cancelar
+              </Link>
+              <Button
+                type="submit"
+                disabled={saving || Boolean(unavailableReason)}
+                className="bg-haus-terracotta text-white hover:bg-haus-terracotta/90"
+              >
+                {saving ? <LoaderCircle className="animate-spin" /> : <Save />}{' '}
+                Salvar reserva
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
       </form>
     </div>
   );

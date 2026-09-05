@@ -2,6 +2,8 @@
 
 Este programa fica aberto no computador do restaurante e acompanha a coleção `whatsappQueue` do Firestore em tempo real. Ele usa a mesma base do robô do programa de fidelidade (`whatsapp-web.js`), mas trabalha com o projeto Firebase do sistema de reservas.
 
+Na versão 2.1, o robô também atualiza `robotStatus/reservas-whatsapp` a cada minuto. Esse registro permite que a Central de pendências mostre a conexão do WhatsApp e do Firebase, o último envio, a quantidade de mensagens pendentes ou com erro, a revisão diária das 15h e a versão em execução. O sinal não consulta reservas nem dados de clientes.
+
 ## Primeira configuração
 
 1. Instale o Node.js 20 ou mais recente.

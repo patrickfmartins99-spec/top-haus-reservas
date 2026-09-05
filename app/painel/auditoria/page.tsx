@@ -51,6 +51,12 @@ const actionLabels: Record<string, string> = {
   staff_deleted: 'Excluiu um acesso',
   staff_deletion_requested: 'Solicitou exclusão de acesso',
   settings_updated: 'Alterou as configurações',
+  special_date_saved: 'Criou ou alterou uma data especial',
+  special_date_removed: 'Removeu uma data especial',
+  operational_task_claim: 'Assumiu uma pendência',
+  operational_task_resolve: 'Resolveu uma pendência',
+  operational_task_dismiss: 'Dispensou uma pendência',
+  operational_task_reopen: 'Reabriu uma pendência',
 };
 
 const statusLabels: Record<string, string> = {

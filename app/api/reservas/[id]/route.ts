@@ -1,8 +1,10 @@
+import { createHash } from 'node:crypto';
 import { FieldValue } from 'firebase-admin/firestore';
 import { after, NextResponse } from 'next/server';
 
 import { requireStaff } from '@/lib/auth/staff-request';
 import {
+  ALLOWED_TIMES,
   isMonday,
   isReservationInput,
   reservationInstant,
@@ -321,19 +323,38 @@ export async function PATCH(
       { status: 400 },
     );
   }
-  const arrivalLimit =
-    payload.service === 'almoco'
-      ? settings.lunchArrivalLimit
-      : settings.dinnerArrivalLimit;
-  if (payload.arrivalTime > arrivalLimit) {
-    return NextResponse.json(
-      { error: `O horário máximo de chegada é ${arrivalLimit}.` },
-      { status: 400 },
-    );
-  }
-
   const { id } = await params;
   const reservationRef = database.collection('reservations').doc(id);
+  const nextWhatsapp = payload.whatsapp.replace(/\D/g, '');
+  const duplicateKey = createHash('sha256')
+    .update(`${nextWhatsapp}|${payload.serviceDate}|${payload.service}`)
+    .digest('hex');
+  const duplicateCandidates = await database
+    .collection('reservations')
+    .where('whatsapp', '==', nextWhatsapp)
+    .limit(50)
+    .get();
+  if (
+    duplicateCandidates.docs.some((document) => {
+      if (document.id === id) return false;
+      const data = document.data();
+      return (
+        !data.deletedAt &&
+        data.serviceDate === payload.serviceDate &&
+        data.service === payload.service &&
+        !['cancelled', 'no_show', 'completed'].includes(String(data.status))
+      );
+    })
+  ) {
+    return NextResponse.json(
+      {
+        error:
+          'Já existe outra reserva ativa para este WhatsApp, data e serviço.',
+        duplicate: true,
+      },
+      { status: 409 },
+    );
+  }
 
   try {
     await database.runTransaction(async (transaction) => {
@@ -362,34 +383,89 @@ export async function PATCH(
         .collection('serviceCapacity')
         .doc(nextKey);
       const movingService = previousKey !== nextKey;
-      const shouldValidateOpening = movingService && nextHeldSeats > 0;
+      const scheduleChanged =
+        movingService ||
+        String(previous.arrivalTime ?? '') !== payload.arrivalTime;
+      const shouldValidateOpening = scheduleChanged && nextHeldSeats > 0;
 
       const previousCapacitySnapshot =
         await transaction.get(previousCapacityRef);
       const nextCapacitySnapshot = movingService
         ? await transaction.get(nextCapacityRef)
         : previousCapacitySnapshot;
-      const specialDateSnapshot = shouldValidateOpening
-        ? await transaction.get(
-            database.collection('specialDates').doc(nextKey),
-          )
-        : null;
+      const specialDateSnapshot = await transaction.get(
+        database.collection('specialDates').doc(nextKey),
+      );
+      const duplicateRef = database
+        .collection('reservationDedup')
+        .doc(duplicateKey);
+      const duplicateSnapshot = await transaction.get(duplicateRef);
 
+      const specialDate = specialDateSnapshot.data();
       if (shouldValidateOpening) {
-        const specialDate = specialDateSnapshot?.data();
         if (
           specialDate?.isOpen === false ||
           (isMonday(payload.serviceDate) && specialDate?.isOpen !== true)
         ) {
           throw new Error('CLOSED_DATE');
         }
+        if (specialDate?.bookingPaused === true)
+          throw new Error(
+            `PAUSED_DATE:${String(specialDate.customerNotice ?? '')}`,
+          );
       }
+
+      const allowedTimes =
+        Array.isArray(specialDate?.arrivalTimes) &&
+        specialDate.arrivalTimes.length
+          ? specialDate.arrivalTimes
+          : ALLOWED_TIMES[payload.service];
+      const arrivalLimit =
+        payload.service === 'almoco'
+          ? settings.lunchArrivalLimit
+          : settings.dinnerArrivalLimit;
+      if (!allowedTimes.includes(payload.arrivalTime))
+        throw new Error('INVALID_SPECIAL_TIME');
+      if (
+        !specialDate?.arrivalTimes?.length &&
+        payload.arrivalTime > arrivalLimit
+      )
+        throw new Error(`ARRIVAL_LIMIT:${arrivalLimit}`);
+
+      if (duplicateSnapshot.exists) {
+        const duplicateReservationId = String(
+          duplicateSnapshot.data()?.reservationId ?? '',
+        );
+        if (duplicateReservationId && duplicateReservationId !== id) {
+          const duplicateReservation = await transaction.get(
+            database.collection('reservations').doc(duplicateReservationId),
+          );
+          const duplicateData = duplicateReservation.data();
+          if (
+            duplicateReservation.exists &&
+            !duplicateData?.deletedAt &&
+            duplicateData?.whatsapp === nextWhatsapp &&
+            duplicateData?.serviceDate === payload.serviceDate &&
+            duplicateData?.service === payload.service &&
+            !['cancelled', 'no_show', 'completed'].includes(
+              String(duplicateData?.status),
+            )
+          )
+            throw new Error('DUPLICATE_RESERVATION');
+        }
+      }
+
+      const effectiveCapacity =
+        Number.isInteger(Number(specialDate?.capacityLimit)) &&
+        Number(specialDate?.capacityLimit) > 0
+          ? Number(specialDate?.capacityLimit)
+          : settings.capacityPerService;
 
       if (movingService) {
         const currentNextHeldSeats = Number(
           nextCapacitySnapshot.data()?.heldSeats ?? 0,
         );
-        if (currentNextHeldSeats + nextHeldSeats > settings.capacityPerService)
+        if (currentNextHeldSeats + nextHeldSeats > effectiveCapacity)
           throw new Error('CAPACITY_EXCEEDED');
 
         transaction.set(
@@ -410,7 +486,7 @@ export async function PATCH(
           {
             serviceDate: payload.serviceDate,
             service: payload.service,
-            limit: settings.capacityPerService,
+            limit: effectiveCapacity,
             heldSeats: currentNextHeldSeats + nextHeldSeats,
             updatedAt: FieldValue.serverTimestamp(),
           },
@@ -424,14 +500,17 @@ export async function PATCH(
           0,
           currentHeldSeats - previousHeldSeats + nextHeldSeats,
         );
-        if (adjustedHeldSeats > settings.capacityPerService)
+        if (
+          adjustedHeldSeats > effectiveCapacity &&
+          adjustedHeldSeats > currentHeldSeats
+        )
           throw new Error('CAPACITY_EXCEEDED');
         transaction.set(
           previousCapacityRef,
           {
             serviceDate: payload.serviceDate,
             service: payload.service,
-            limit: settings.capacityPerService,
+            limit: effectiveCapacity,
             heldSeats: adjustedHeldSeats,
             updatedAt: FieldValue.serverTimestamp(),
           },
@@ -441,7 +520,7 @@ export async function PATCH(
 
       const updatedReservation = {
         customerName: payload.customerName.trim(),
-        whatsapp: payload.whatsapp.replace(/\D/g, ''),
+        whatsapp: nextWhatsapp,
         partySize: payload.partySize,
         service: payload.service,
         serviceDate: payload.serviceDate,
@@ -486,6 +565,13 @@ export async function PATCH(
           : {}),
         updatedAt: FieldValue.serverTimestamp(),
         updatedBy: context.decodedToken.uid,
+      });
+      transaction.set(duplicateRef, {
+        reservationId: id,
+        whatsapp: nextWhatsapp,
+        serviceDate: payload.serviceDate,
+        service: payload.service,
+        updatedAt: FieldValue.serverTimestamp(),
       });
       transaction.set(database.collection('auditLogs').doc(), {
         reservationId: id,
@@ -594,6 +680,40 @@ export async function PATCH(
       return NextResponse.json(
         {
           error: `A alteração ultrapassa a cota de ${settings.capacityPerService} lugares desse serviço.`,
+        },
+        { status: 409 },
+      );
+    }
+    if (error instanceof Error && error.message === 'DUPLICATE_RESERVATION') {
+      return NextResponse.json(
+        {
+          error:
+            'Já existe outra reserva ativa para este WhatsApp, data e serviço.',
+          duplicate: true,
+        },
+        { status: 409 },
+      );
+    }
+    if (error instanceof Error && error.message === 'INVALID_SPECIAL_TIME') {
+      return NextResponse.json(
+        { error: 'O horário escolhido não está disponível nesta data.' },
+        { status: 409 },
+      );
+    }
+    if (error instanceof Error && error.message.startsWith('ARRIVAL_LIMIT:')) {
+      return NextResponse.json(
+        {
+          error: `O horário máximo de chegada é ${error.message.slice('ARRIVAL_LIMIT:'.length)}.`,
+        },
+        { status: 400 },
+      );
+    }
+    if (error instanceof Error && error.message.startsWith('PAUSED_DATE:')) {
+      return NextResponse.json(
+        {
+          error:
+            error.message.slice('PAUSED_DATE:'.length) ||
+            'As reservas estão temporariamente suspensas nesta data.',
         },
         { status: 409 },
       );

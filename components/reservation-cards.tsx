@@ -57,7 +57,7 @@ export function ReservationCards({
             </span>
             <span
               className={
-                'rounded-full px-3 py-1.5 text-xs font-bold ' +
+                'rounded-full px-3 py-1.5 text-sm font-bold ' +
                 (r.status === 'pending_approval'
                   ? 'bg-amber-100 text-amber-900'
                   : ['cancelled', 'no_show'].includes(r.status)
@@ -88,11 +88,13 @@ export function ReservationCards({
               <strong>Observações:</strong> {r.notes}
             </p>
           )}
-          <details className="text-xs text-black/70">
+          <details className="text-sm text-black/80">
             <summary className="cursor-pointer font-semibold">
               Código da reserva
             </summary>
-            <p className="mt-2 break-all font-mono">{r.id}</p>
+            <p className="mt-2 break-all rounded-lg bg-stone-100 px-3 py-2 font-mono font-semibold text-black">
+              {r.id}
+            </p>
           </details>
           {actions && (
             <div className="flex flex-wrap gap-2 border-t border-black/10 pt-3">

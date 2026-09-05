@@ -18,7 +18,11 @@ import {
 
 import { CustomerNotifications } from '@/components/customer-notifications';
 import { rememberReservation } from '@/lib/customer-notifications-client';
-import { minimumBookingDate, brazilDate, canBook } from '@/lib/domain/reservations';
+import {
+  minimumBookingDate,
+  brazilDate,
+  canBook,
+} from '@/lib/domain/reservations';
 import { BrandLogo } from '@/components/brand-logo';
 import { Button } from '@/components/ui/button';
 import {
@@ -32,7 +36,11 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
-import { DEFAULT_OPERATIONAL_SETTINGS, type OperationalSettings } from '@/lib/domain/operational-settings';
+import {
+  DEFAULT_OPERATIONAL_SETTINGS,
+  type OperationalSettings,
+} from '@/lib/domain/operational-settings';
+import type { SpecialDateException } from '@/lib/domain/special-dates';
 
 type Service = 'almoco' | 'rodizio';
 
@@ -64,14 +72,25 @@ export default function Home() {
   const [whatsapp, setWhatsapp] = useState('');
   const [notes, setNotes] = useState('');
   const [submitting, setSubmitting] = useState(false);
-  const [result, setResult] = useState<{ id: string; status: string } | null>(null);
+  const [result, setResult] = useState<{ id: string; status: string } | null>(
+    null,
+  );
   const [error, setError] = useState('');
-  const [settings, setSettings] = useState<OperationalSettings>(DEFAULT_OPERATIONAL_SETTINGS);
+  const [settings, setSettings] = useState<OperationalSettings>(
+    DEFAULT_OPERATIONAL_SETTINGS,
+  );
+  const [exceptions, setExceptions] = useState<SpecialDateException[]>([]);
 
   useEffect(() => {
-    fetch('/api/configuracoes/publicas').then(async (response) => {
-      if (response.ok) setSettings((await response.json()).settings);
-    }).catch(() => undefined);
+    fetch('/api/configuracoes/publicas')
+      .then(async (response) => {
+        if (response.ok) {
+          const data = await response.json();
+          setSettings(data.settings);
+          setExceptions(data.exceptions ?? []);
+        }
+      })
+      .catch(() => undefined);
   }, []);
 
   const { minDate, maxDate } = useMemo(() => {
@@ -86,16 +105,72 @@ export default function Home() {
     return new Date(`${date}T12:00:00`).getDay() === 1;
   }, [date]);
 
+  const selectedException = useMemo(
+    () =>
+      exceptions.find(
+        (item) => item.serviceDate === date && item.service === service,
+      ),
+    [date, exceptions, service],
+  );
+  const availableTimes = selectedException?.arrivalTimes.length
+    ? selectedException.arrivalTimes
+    : services[service].times;
+  const unavailableReason =
+    selectedException?.isOpen === false
+      ? selectedException.customerNotice ||
+        'O Top Haus não receberá reservas para este serviço nesta data.'
+      : selectedException?.bookingPaused
+        ? selectedException.customerNotice ||
+          'As reservas online estão temporariamente suspensas nesta data.'
+        : mondaySelected && selectedException?.isOpen !== true
+          ? 'O Top Haus não receberá reservas para este serviço nesta segunda-feira.'
+          : '';
+
   function chooseService(nextService: Service) {
     setService(nextService);
-    setTime(services[nextService].times[0]);
+    const specialTimes = exceptions.find(
+      (item) => item.serviceDate === date && item.service === nextService,
+    )?.arrivalTimes;
+    setTime(
+      specialTimes?.length ? specialTimes[0] : services[nextService].times[0],
+    );
     setChecked(false);
   }
 
-  async function checkAvailability(event: React.SyntheticEvent<HTMLFormElement>) {
+  function chooseDate(nextDate: string) {
+    setDate(nextDate);
+    const specialTimes = exceptions.find(
+      (item) => item.serviceDate === nextDate && item.service === service,
+    )?.arrivalTimes;
+    const nextTimes = specialTimes?.length
+      ? specialTimes
+      : services[service].times;
+    if (!nextTimes.includes(time)) setTime(nextTimes[0] ?? '');
+    setChecked(false);
+  }
+
+  async function checkAvailability(
+    event: React.SyntheticEvent<HTMLFormElement>,
+  ) {
     event.preventDefault();
     if (!date) return;
-    if (!canBook({ service, serviceDate: date, arrivalTime: time }, settings.minAdvanceHours)) { setError(service === 'rodizio' ? 'As reservas para hoje encerram às 18h (horário de Brasília).' : `O almoço exige ${settings.minAdvanceHours} horas de antecedência.`); return; }
+    if (unavailableReason) {
+      setError(unavailableReason);
+      return;
+    }
+    if (
+      !canBook(
+        { service, serviceDate: date, arrivalTime: time },
+        settings.minAdvanceHours,
+      )
+    ) {
+      setError(
+        service === 'rodizio'
+          ? 'As reservas para hoje encerram às 18h (horário de Brasília).'
+          : `O almoço exige ${settings.minAdvanceHours} horas de antecedência.`,
+      );
+      return;
+    }
     if (!checked) {
       setChecked(true);
       return;
@@ -118,11 +193,16 @@ export default function Home() {
         }),
       });
       const data = await response.json();
-      if (!response.ok) throw new Error(data.error ?? 'Não foi possível concluir a reserva.');
+      if (!response.ok)
+        throw new Error(data.error ?? 'Não foi possível concluir a reserva.');
       setResult(data);
       rememberReservation(data.id, data.token);
     } catch (caughtError) {
-      setError(caughtError instanceof Error ? caughtError.message : 'Não foi possível concluir a reserva.');
+      setError(
+        caughtError instanceof Error
+          ? caughtError.message
+          : 'Não foi possível concluir a reserva.',
+      );
     } finally {
       setSubmitting(false);
     }
@@ -132,20 +212,29 @@ export default function Home() {
     <main className="min-h-screen overflow-hidden bg-background text-foreground">
       <header className="border-b border-white/10 bg-haus-ink text-white">
         <div className="mx-auto flex h-20 max-w-7xl items-center justify-between px-5 sm:px-8">
-          <a href="#inicio" className="flex items-center gap-3" aria-label="Top Haus — início">
+          <a
+            href="#inicio"
+            className="flex items-center gap-3"
+            aria-label="Top Haus — início"
+          >
             <BrandLogo compact priority className="rounded-md" />
             <span className="hidden border-l border-white/15 pl-3 sm:block">
               <span className="block text-sm font-semibold">Reservas</span>
-              <span className="block text-[10px] uppercase tracking-[0.18em] text-white/75">Cliente</span>
+              <span className="block text-[10px] uppercase tracking-[0.18em] text-white/75">
+                Cliente
+              </span>
             </span>
           </a>
-          <div className="flex items-center gap-2"><CustomerNotifications /><Link
-            href="/minha-reserva"
-            className="flex items-center gap-2 rounded-full border border-white/15 px-4 py-2 text-sm font-medium text-white/85 transition hover:border-haus-gold/60 hover:text-white"
-          >
-            Consultar reserva
-            <ChevronRight className="size-4" />
-          </Link></div>
+          <div className="flex items-center gap-2">
+            <CustomerNotifications />
+            <Link
+              href="/minha-reserva"
+              className="flex items-center gap-2 rounded-full border border-white/15 px-4 py-2 text-sm font-medium text-white/85 transition hover:border-haus-gold/60 hover:text-white"
+            >
+              Consultar reserva
+              <ChevronRight className="size-4" />
+            </Link>
+          </div>
         </div>
       </header>
 
@@ -165,151 +254,311 @@ export default function Home() {
               Sua mesa no Top Haus, sem complicação.
             </h1>
             <p className="mt-6 max-w-lg text-base leading-7 text-white/85 sm:text-lg">
-              Escolha o almoço ou o rodízio, informe o tamanho do grupo e encontre o melhor horário para sua visita.
+              Escolha o almoço ou o rodízio, informe o tamanho do grupo e
+              encontre o melhor horário para sua visita.
             </p>
             <div className="mt-8 flex flex-wrap gap-x-6 gap-y-3 text-sm text-white/90">
-              <span className="flex items-center gap-2"><Check className="size-4 text-haus-gold" /> Consulta e alterações pelo site</span>
-              <span className="flex items-center gap-2"><Check className="size-4 text-haus-gold" /> Sem necessidade de cadastro</span>
+              <span className="flex items-center gap-2">
+                <Check className="size-4 text-haus-gold" /> Consulta e
+                alterações pelo site
+              </span>
+              <span className="flex items-center gap-2">
+                <Check className="size-4 text-haus-gold" /> Sem necessidade de
+                cadastro
+              </span>
             </div>
           </div>
 
-          <Card id="reserva" className="border-0 bg-[#fdfcf9] py-0 text-haus-ink shadow-[0_28px_80px_rgba(0,0,0,0.28)] ring-0">
+          <Card
+            id="reserva"
+            className="border-0 bg-[#fdfcf9] py-0 text-haus-ink shadow-[0_28px_80px_rgba(0,0,0,0.28)] ring-0"
+          >
             <CardHeader className="border-b border-black/7 px-5 py-5 sm:px-7 sm:py-6">
               <div className="flex items-center justify-between gap-4">
                 <div>
-                  <CardTitle className="font-heading text-2xl font-bold">Fazer uma reserva</CardTitle>
-                  <CardDescription className="mt-1 text-haus-ink/55">Leva menos de dois minutos.</CardDescription>
+                  <CardTitle className="font-heading text-2xl font-bold">
+                    Fazer uma reserva
+                  </CardTitle>
+                  <CardDescription className="mt-1 text-haus-ink/55">
+                    Leva menos de dois minutos.
+                  </CardDescription>
                 </div>
-                <div className="hidden items-center gap-2 sm:flex" aria-label={checked ? 'Etapa 2 de 2' : 'Etapa 1 de 2'}>
-                  <span className="grid size-6 place-items-center rounded-full bg-haus-ink text-[11px] font-bold text-white">1</span>
+                <div
+                  className="hidden items-center gap-2 sm:flex"
+                  aria-label={checked ? 'Etapa 2 de 2' : 'Etapa 1 de 2'}
+                >
+                  <span className="grid size-6 place-items-center rounded-full bg-haus-ink text-[11px] font-bold text-white">
+                    1
+                  </span>
                   <span className="h-px w-5 bg-black/15" />
-                  <span className={`grid size-6 place-items-center rounded-full text-[11px] font-bold ${checked ? 'bg-haus-terracotta text-white' : 'bg-black/7 text-black/35'}`}>2</span>
+                  <span
+                    className={`grid size-6 place-items-center rounded-full text-[11px] font-bold ${checked ? 'bg-haus-terracotta text-white' : 'bg-black/7 text-black/35'}`}
+                  >
+                    2
+                  </span>
                 </div>
               </div>
             </CardHeader>
             <CardContent className="px-5 py-5 sm:px-7 sm:py-6">
               {result ? (
                 <output className="block py-5 text-center">
-                  <span className="mx-auto grid size-16 place-items-center rounded-full bg-haus-sage/10 text-haus-sage"><CheckCircle2 className="size-8" /></span>
+                  <span className="mx-auto grid size-16 place-items-center rounded-full bg-haus-sage/10 text-haus-sage">
+                    <CheckCircle2 className="size-8" />
+                  </span>
                   <h2 className="mt-5 font-heading text-2xl font-bold">
-                    {result.status === 'confirmed' ? 'Reserva confirmada!' : 'Solicitação enviada!'}
+                    {result.status === 'confirmed'
+                      ? 'Reserva confirmada!'
+                      : 'Solicitação enviada!'}
                   </h2>
                   <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-haus-ink/60">
                     {result.status === 'confirmed'
                       ? 'Guarde o código abaixo. Com ele e seu WhatsApp, você pode consultar ou alterar a reserva.'
                       : 'A equipe do Top Haus analisará o grupo. Guarde o código para acompanhar a solicitação.'}
                   </p>
-                  <p className="mt-3 text-sm font-semibold text-black/80">Acompanhe as atualizações pelo sino de notificações do site.</p>
-                  <p className="mt-5 break-all rounded-xl bg-black px-4 py-3 font-mono text-sm font-bold text-white">Código {result.id}</p>
-                  <div className="mt-6 flex flex-wrap justify-center gap-3"><Link href={`/minha-reserva?codigo=${encodeURIComponent(result.id)}`} className="inline-flex h-8 items-center justify-center rounded-lg border border-black/15 px-3 text-sm font-semibold hover:bg-black/5">Consultar esta reserva</Link><Button type="button" variant="outline" onClick={() => { setResult(null); setChecked(false); }}>Fazer outra reserva</Button></div>
+                  <p className="mt-3 text-sm font-semibold text-black/80">
+                    Acompanhe as atualizações pelo sino de notificações do site.
+                  </p>
+                  <p className="mt-5 break-all rounded-xl bg-black px-4 py-3 font-mono text-sm font-bold text-white">
+                    Código {result.id}
+                  </p>
+                  <div className="mt-6 flex flex-wrap justify-center gap-3">
+                    <Link
+                      href={`/minha-reserva?codigo=${encodeURIComponent(result.id)}`}
+                      className="inline-flex h-8 items-center justify-center rounded-lg border border-black/15 px-3 text-sm font-semibold hover:bg-black/5"
+                    >
+                      Consultar esta reserva
+                    </Link>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => {
+                        setResult(null);
+                        setChecked(false);
+                      }}
+                    >
+                      Fazer outra reserva
+                    </Button>
+                  </div>
                 </output>
               ) : (
-              <form onSubmit={checkAvailability} className="space-y-6">
-                <fieldset>
-                  <legend className="mb-3 text-xs font-bold uppercase tracking-[0.16em] text-haus-ink/50">Escolha o serviço</legend>
-                  <div className="grid grid-cols-2 gap-3">
-                    {(Object.keys(services) as Service[]).map((item) => (
-                      <button
-                        type="button"
-                        key={item}
-                        onClick={() => chooseService(item)}
-                        className={cn(
-                          'rounded-xl border p-4 text-left transition focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-haus-gold/30',
-                          service === item
-                            ? 'border-haus-terracotta bg-haus-terracotta/[0.07] shadow-[inset_0_0_0_1px_var(--color-haus-terracotta)]'
-                            : 'border-black/10 bg-white hover:border-black/25',
-                        )}
-                      >
-                        <span className="block font-heading text-base font-bold">{services[item].label}</span>
-                        <span className="mt-1 block text-xs text-haus-ink/50">{services[item].subtitle}</span>
-                      </button>
-                    ))}
-                  </div>
-                </fieldset>
-
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <div className="space-y-2">
-                    <Label htmlFor="date"><CalendarDays className="size-4 text-haus-terracotta" /> Data</Label>
-                    <Input
-                      id="date"
-                      type="date"
-                      min={minDate}
-                      max={maxDate}
-                      value={date}
-                      onChange={(event) => { setDate(event.target.value); setChecked(false); }}
-                      className="h-11 border-black/12 bg-white px-3"
-                      required
-                    />
-                    {mondaySelected && (
-                      <p className="text-xs font-medium text-[#7b571d]">Segundas-feiras abrem somente em datas especiais; a disponibilidade será verificada.</p>
-                    )}
-                  </div>
-                  <div className="space-y-2">
-                    <Label><Users className="size-4 text-haus-terracotta" /> Pessoas</Label>
-                    <div className="flex h-11 items-center justify-between rounded-lg border border-black/12 bg-white px-2">
-                      <button type="button" onClick={() => { setPartySize((value) => Math.max(1, value - 1)); setChecked(false); }} className="grid size-8 place-items-center rounded-md hover:bg-black/5" aria-label="Remover uma pessoa"><Minus className="size-4" /></button>
-                      <strong className="min-w-24 text-center text-sm">{partySize} {partySize === 1 ? 'pessoa' : 'pessoas'}</strong>
-                      <button type="button" onClick={() => { setPartySize((value) => value + 1); setChecked(false); }} className="grid size-8 place-items-center rounded-md hover:bg-black/5" aria-label="Adicionar uma pessoa"><Plus className="size-4" /></button>
+                <form onSubmit={checkAvailability} className="space-y-6">
+                  <fieldset>
+                    <legend className="mb-3 text-xs font-bold uppercase tracking-[0.16em] text-haus-ink/50">
+                      Escolha o serviço
+                    </legend>
+                    <div className="grid grid-cols-2 gap-3">
+                      {(Object.keys(services) as Service[]).map((item) => (
+                        <button
+                          type="button"
+                          key={item}
+                          onClick={() => chooseService(item)}
+                          className={cn(
+                            'rounded-xl border p-4 text-left transition focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-haus-gold/30',
+                            service === item
+                              ? 'border-haus-terracotta bg-haus-terracotta/[0.07] shadow-[inset_0_0_0_1px_var(--color-haus-terracotta)]'
+                              : 'border-black/10 bg-white hover:border-black/25',
+                          )}
+                        >
+                          <span className="block font-heading text-base font-bold">
+                            {services[item].label}
+                          </span>
+                          <span className="mt-1 block text-xs text-haus-ink/50">
+                            {services[item].subtitle}
+                          </span>
+                        </button>
+                      ))}
                     </div>
-                  </div>
-                </div>
+                  </fieldset>
 
-                <fieldset>
-                  <legend className="mb-3 flex items-center gap-2 text-sm font-medium"><Clock3 className="size-4 text-haus-terracotta" /> Horário de chegada</legend>
-                  <div className="grid grid-cols-3 gap-2">
-                    {services[service].times.map((item) => (
-                      <button
-                        type="button"
-                        key={item}
-                        onClick={() => { setTime(item); setChecked(false); }}
-                        className={cn(
-                          'h-10 rounded-lg border text-sm font-semibold transition',
-                          time === item ? 'border-haus-ink bg-haus-ink text-white' : 'border-black/10 bg-white hover:border-black/25',
-                        )}
-                      >
-                        {item}
-                      </button>
-                    ))}
-                  </div>
-                  <p className="mt-2 text-xs text-haus-ink/60">Chegada para {services[service].label.toLowerCase()} até {service === 'almoco' ? settings.lunchArrivalLimit : settings.dinnerArrivalLimit}. Há {settings.lateToleranceMinutes} minutos de tolerância.</p>
-                </fieldset>
-
-                {checked && (
-                  <div className="space-y-5">
-                    <output className="block rounded-xl border border-haus-sage/25 bg-haus-sage/[0.07] p-4">
-                      <p className="flex items-center gap-2 font-semibold text-haus-sage"><ShieldCheck className="size-5" /> Confira seus dados</p>
-                      <p className="mt-1 text-sm text-haus-ink/60">
-                        {partySize <= settings.autoApprovalLimit
-                          ? 'Preencha seus dados para confirmar a reserva automaticamente.'
-                          : 'Preencha seus dados para enviar o grupo à aprovação da equipe.'}
-                      </p>
-                    </output>
-
-                    <div className="grid gap-4 sm:grid-cols-2">
-                      <div className="space-y-2">
-                        <Label htmlFor="customer-name">Nome</Label>
-                        <Input id="customer-name" value={customerName} onChange={(event) => setCustomerName(event.target.value)} className="h-11 border-black/12 bg-white" placeholder="Seu nome" minLength={2} required />
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="whatsapp">WhatsApp</Label>
-                        <Input id="whatsapp" value={whatsapp} onChange={(event) => setWhatsapp(event.target.value)} className="h-11 border-black/12 bg-white" placeholder="(00) 00000-0000" inputMode="tel" required />
-                      </div>
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <div className="space-y-2">
+                      <Label htmlFor="date">
+                        <CalendarDays className="size-4 text-haus-terracotta" />{' '}
+                        Data
+                      </Label>
+                      <Input
+                        id="date"
+                        type="date"
+                        min={minDate}
+                        max={maxDate}
+                        value={date}
+                        onChange={(event) => chooseDate(event.target.value)}
+                        className="h-11 border-black/12 bg-white px-3"
+                        required
+                      />
+                      {mondaySelected && !selectedException && (
+                        <p className="text-xs font-medium text-[#7b571d]">
+                          Segundas-feiras abrem somente em datas especiais.
+                        </p>
+                      )}
                     </div>
                     <div className="space-y-2">
-                      <Label htmlFor="notes">Observações</Label>
-                      <Textarea id="notes" value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Aniversário, acessibilidade ou outro pedido especial" maxLength={1000} className="border-black/12 bg-white" />
+                      <Label>
+                        <Users className="size-4 text-haus-terracotta" />{' '}
+                        Pessoas
+                      </Label>
+                      <div className="flex h-11 items-center justify-between rounded-lg border border-black/12 bg-white px-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setPartySize((value) => Math.max(1, value - 1));
+                            setChecked(false);
+                          }}
+                          className="grid size-8 place-items-center rounded-md hover:bg-black/5"
+                          aria-label="Remover uma pessoa"
+                        >
+                          <Minus className="size-4" />
+                        </button>
+                        <strong className="min-w-24 text-center text-sm">
+                          {partySize} {partySize === 1 ? 'pessoa' : 'pessoas'}
+                        </strong>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setPartySize((value) => value + 1);
+                            setChecked(false);
+                          }}
+                          className="grid size-8 place-items-center rounded-md hover:bg-black/5"
+                          aria-label="Adicionar uma pessoa"
+                        >
+                          <Plus className="size-4" />
+                        </button>
+                      </div>
                     </div>
                   </div>
-                )}
 
-                {error && <p className="rounded-lg bg-destructive/10 px-4 py-3 text-sm font-medium text-destructive" role="alert">{error}</p>}
+                  <fieldset>
+                    <legend className="mb-3 flex items-center gap-2 text-sm font-medium">
+                      <Clock3 className="size-4 text-haus-terracotta" /> Horário
+                      de chegada
+                    </legend>
+                    <div className="grid grid-cols-3 gap-2">
+                      {availableTimes.map((item) => (
+                        <button
+                          type="button"
+                          key={item}
+                          onClick={() => {
+                            setTime(item);
+                            setChecked(false);
+                          }}
+                          className={cn(
+                            'h-10 rounded-lg border text-sm font-semibold transition',
+                            time === item
+                              ? 'border-haus-ink bg-haus-ink text-white'
+                              : 'border-black/10 bg-white hover:border-black/25',
+                          )}
+                        >
+                          {item}
+                        </button>
+                      ))}
+                    </div>
+                    <p className="mt-2 text-xs text-haus-ink/60">
+                      {selectedException?.arrivalTimes.length
+                        ? 'Horários definidos especialmente para esta data.'
+                        : `Chegada para ${services[service].label.toLowerCase()} até ${service === 'almoco' ? settings.lunchArrivalLimit : settings.dinnerArrivalLimit}.`}{' '}
+                      Há {settings.lateToleranceMinutes} minutos de tolerância.
+                    </p>
+                  </fieldset>
 
-                <Button type="submit" size="lg" disabled={!date || submitting} className="h-12 w-full rounded-xl bg-haus-terracotta text-base font-bold text-white hover:bg-haus-terracotta/90">
-                  {submitting && <LoaderCircle className="size-5 animate-spin" />}
-                  {checked ? (partySize <= settings.autoApprovalLimit ? 'Confirmar reserva' : 'Enviar para aprovação') : 'Continuar'}
-                  {!submitting && <ChevronRight className="size-5" />}
-                </Button>
-              </form>
+                  {selectedException?.customerNotice ? (
+                    <p
+                      className={`rounded-xl border px-4 py-3 text-sm font-semibold ${unavailableReason ? 'border-red-200 bg-red-50 text-red-800' : 'border-haus-gold/35 bg-[#f4e7d7] text-[#67431f]'}`}
+                      role={unavailableReason ? 'alert' : undefined}
+                    >
+                      {selectedException.customerNotice}
+                    </p>
+                  ) : unavailableReason ? (
+                    <p
+                      className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-800"
+                      role="alert"
+                    >
+                      {unavailableReason}
+                    </p>
+                  ) : null}
+
+                  {checked && (
+                    <div className="space-y-5">
+                      <output className="block rounded-xl border border-haus-sage/25 bg-haus-sage/[0.07] p-4">
+                        <p className="flex items-center gap-2 font-semibold text-haus-sage">
+                          <ShieldCheck className="size-5" /> Confira seus dados
+                        </p>
+                        <p className="mt-1 text-sm text-haus-ink/60">
+                          {partySize <= settings.autoApprovalLimit
+                            ? 'Preencha seus dados para confirmar a reserva automaticamente.'
+                            : 'Preencha seus dados para enviar o grupo à aprovação da equipe.'}
+                        </p>
+                      </output>
+
+                      <div className="grid gap-4 sm:grid-cols-2">
+                        <div className="space-y-2">
+                          <Label htmlFor="customer-name">Nome</Label>
+                          <Input
+                            id="customer-name"
+                            value={customerName}
+                            onChange={(event) =>
+                              setCustomerName(event.target.value)
+                            }
+                            className="h-11 border-black/12 bg-white"
+                            placeholder="Seu nome"
+                            minLength={2}
+                            required
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="whatsapp">WhatsApp</Label>
+                          <Input
+                            id="whatsapp"
+                            value={whatsapp}
+                            onChange={(event) =>
+                              setWhatsapp(event.target.value)
+                            }
+                            className="h-11 border-black/12 bg-white"
+                            placeholder="(00) 00000-0000"
+                            inputMode="tel"
+                            required
+                          />
+                        </div>
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="notes">Observações</Label>
+                        <Textarea
+                          id="notes"
+                          value={notes}
+                          onChange={(event) => setNotes(event.target.value)}
+                          placeholder="Aniversário, acessibilidade ou outro pedido especial"
+                          maxLength={1000}
+                          className="border-black/12 bg-white"
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {error && (
+                    <p
+                      className="rounded-lg bg-destructive/10 px-4 py-3 text-sm font-medium text-destructive"
+                      role="alert"
+                    >
+                      {error}
+                    </p>
+                  )}
+
+                  <Button
+                    type="submit"
+                    size="lg"
+                    disabled={!date || submitting || Boolean(unavailableReason)}
+                    className="h-12 w-full rounded-xl bg-haus-terracotta text-base font-bold text-white hover:bg-haus-terracotta/90"
+                  >
+                    {submitting && (
+                      <LoaderCircle className="size-5 animate-spin" />
+                    )}
+                    {checked
+                      ? partySize <= settings.autoApprovalLimit
+                        ? 'Confirmar reserva'
+                        : 'Enviar para aprovação'
+                      : 'Continuar'}
+                    {!submitting && <ChevronRight className="size-5" />}
+                  </Button>
+                </form>
               )}
             </CardContent>
           </Card>
@@ -319,15 +568,36 @@ export default function Home() {
       <section className="bg-[#efede8] px-5 py-12 sm:px-8">
         <div className="mx-auto grid max-w-7xl gap-5 sm:grid-cols-3">
           {[
-            { icon: Clock3, title: 'Chegue no horário', text: 'Sua mesa fica reservada por 10 minutos após o horário escolhido.' },
-            { icon: MessageCircle, title: 'Atendimento pelo WhatsApp', text: 'Quando necessário, fale com a equipe usando a conversa preparada pelo sistema.' },
-            { icon: CalendarDays, title: 'Planeje com antecedência', text: `Rodízio: reserve até as 18h do dia da visita. Almoço: mínimo de ${settings.minAdvanceHours} horas de antecedência. Calendário aberto por ${settings.maxBookingMonths} meses.` },
+            {
+              icon: Clock3,
+              title: 'Chegue no horário',
+              text: 'Sua mesa fica reservada por 10 minutos após o horário escolhido.',
+            },
+            {
+              icon: MessageCircle,
+              title: 'Atendimento pelo WhatsApp',
+              text: 'Quando necessário, fale com a equipe usando a conversa preparada pelo sistema.',
+            },
+            {
+              icon: CalendarDays,
+              title: 'Planeje com antecedência',
+              text: `Rodízio: reserve até as 18h do dia da visita. Almoço: mínimo de ${settings.minAdvanceHours} horas de antecedência. Calendário aberto por ${settings.maxBookingMonths} meses.`,
+            },
           ].map(({ icon: Icon, title, text }) => (
-            <article key={title} className="flex gap-4 rounded-2xl border border-black/7 bg-white/60 p-5">
-              <span className="grid size-10 shrink-0 place-items-center rounded-full bg-haus-terracotta/10 text-haus-terracotta"><Icon className="size-5" /></span>
+            <article
+              key={title}
+              className="flex gap-4 rounded-2xl border border-black/7 bg-white/60 p-5"
+            >
+              <span className="grid size-10 shrink-0 place-items-center rounded-full bg-haus-terracotta/10 text-haus-terracotta">
+                <Icon className="size-5" />
+              </span>
               <div>
-                <h2 className="font-heading font-bold text-haus-ink">{title}</h2>
-                <p className="mt-1 text-sm leading-6 text-haus-ink/55">{text}</p>
+                <h2 className="font-heading font-bold text-haus-ink">
+                  {title}
+                </h2>
+                <p className="mt-1 text-sm leading-6 text-haus-ink/55">
+                  {text}
+                </p>
               </div>
             </article>
           ))}

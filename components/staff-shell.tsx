@@ -16,7 +16,9 @@ import {
 import {
   Bell,
   CalendarDays,
+  CalendarRange,
   ChartNoAxesCombined,
+  ClipboardCheck,
   History,
   LayoutDashboard,
   ListOrdered,
@@ -45,6 +47,7 @@ import { getFirebaseClient } from '@/lib/firebase/client';
 
 const navigation = [
   { icon: LayoutDashboard, label: 'Painel geral', href: '/painel' },
+  { icon: ClipboardCheck, label: 'Pendências', href: '/painel/pendencias' },
   { icon: CalendarDays, label: 'Reservas', href: '/painel/reservas' },
   { icon: ListOrdered, label: 'Fila de espera', href: '/painel/fila' },
   {
@@ -55,6 +58,7 @@ const navigation = [
   { icon: MessageCircle, label: 'Mensagens', href: '/painel/mensagens' },
   { icon: History, label: 'Auditoria', href: '/painel/auditoria' },
   { icon: UserCog, label: 'Usuários', href: '/painel/usuarios' },
+  { icon: CalendarRange, label: 'Datas especiais', href: '/painel/calendario' },
   { icon: Settings, label: 'Configurações', href: '/painel/configuracoes' },
 ];
 
@@ -83,7 +87,14 @@ export function StaffShell({ children }: { children: ReactNode }) {
   const [displayName, setDisplayName] = useState('Colaborador');
   const [loggingOut, setLoggingOut] = useState(false);
   const [notifications, setNotifications] = useState<
-    Array<{ id: string; title: string; description: string; href: string }>
+    Array<{
+      id: string;
+      title: string;
+      description: string;
+      href: string;
+      workflowStatus?: string;
+      workflowActorName?: string;
+    }>
   >([]);
 
   useEffect(() => {
@@ -115,7 +126,7 @@ export function StaffShell({ children }: { children: ReactNode }) {
     if (!user) return;
     try {
       const token = await user.getIdToken();
-      const response = await fetch('/api/notificacoes', {
+      const response = await fetch('/api/pendencias', {
         headers: { Authorization: `Bearer ${token}` },
       });
       const data = await response.json();
@@ -133,7 +144,7 @@ export function StaffShell({ children }: { children: ReactNode }) {
     }, 0);
     const interval = window.setInterval(() => {
       void loadNotifications();
-    }, 60000);
+    }, 300000);
     const refresh = () => {
       void loadNotifications();
     };
@@ -207,6 +218,7 @@ export function StaffShell({ children }: { children: ReactNode }) {
     '/painel/usuarios',
     '/painel/auditoria',
     '/painel/relatorios',
+    '/painel/calendario',
   ];
   if (
     profile.role !== 'admin' &&
@@ -221,7 +233,12 @@ export function StaffShell({ children }: { children: ReactNode }) {
   const visibleNavigation = navigation.filter(
     (item) =>
       profile.role === 'admin' ||
-      ['/painel', '/painel/reservas', '/painel/fila'].includes(item.href),
+      [
+        '/painel',
+        '/painel/pendencias',
+        '/painel/reservas',
+        '/painel/fila',
+      ].includes(item.href),
   );
   const initials =
     displayName
@@ -350,8 +367,21 @@ export function StaffShell({ children }: { children: ReactNode }) {
                           <p className="mt-1 text-xs leading-5 text-black/65">
                             {item.description}
                           </p>
+                          {item.workflowStatus === 'claimed' ? (
+                            <p className="mt-2 text-xs font-bold text-[#7b571d]">
+                              Assumida por {item.workflowActorName}
+                            </p>
+                          ) : null}
                         </Link>
                       ))}
+                      {notifications.length ? (
+                        <Link
+                          href="/painel/pendencias"
+                          className="mt-2 block rounded-lg bg-black px-3 py-2.5 text-center text-sm font-bold text-white"
+                        >
+                          Abrir central de pendências
+                        </Link>
+                      ) : null}
                     </div>
                   </PopoverContent>
                 </Popover>
@@ -383,7 +413,7 @@ export function StaffShell({ children }: { children: ReactNode }) {
             </header>
 
             <nav
-              className="flex flex-wrap gap-2 border-b border-black/7 bg-white px-3 pb-3 lg:hidden"
+              className="flex gap-2 overflow-x-auto border-b border-black/7 bg-white px-3 pb-3 lg:hidden"
               aria-label="Navegação do painel"
             >
               {visibleNavigation.map(({ label, href }) => {

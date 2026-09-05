@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { onAuthStateChanged, type User } from 'firebase/auth';
 import {
   CalendarDays,
+  ClipboardCheck,
   CheckCircle2,
   ClipboardList,
   Clock3,
@@ -203,14 +204,25 @@ export default function DashboardPage() {
             ou enviar mensagens.
           </p>
         </div>
-        <Link
-          href="/painel/reservas/nova"
-          className={buttonVariants({
-            className: 'h-10 bg-black px-4 text-white hover:bg-black/85',
-          })}
-        >
-          <Plus className="size-4" /> Nova reserva
-        </Link>
+        <div className="flex flex-wrap gap-2">
+          <Link
+            href="/painel/pendencias"
+            className={buttonVariants({
+              variant: 'outline',
+              className: 'h-10 border-black/15 bg-white px-4',
+            })}
+          >
+            <ClipboardCheck className="size-4" /> Ver pendências
+          </Link>
+          <Link
+            href="/painel/reservas/nova"
+            className={buttonVariants({
+              className: 'h-10 bg-black px-4 text-white hover:bg-black/85',
+            })}
+          >
+            <Plus className="size-4" /> Nova reserva
+          </Link>
+        </div>
       </div>
 
       {error ? (
@@ -234,7 +246,7 @@ export default function DashboardPage() {
               <CardTitle className="font-heading text-xl font-bold">
                 Atendimentos de hoje
               </CardTitle>
-              <p className="mt-1 text-xs font-medium text-haus-ink/65">
+              <p className="mt-1 text-sm font-medium text-haus-ink/65">
                 Reservas ativas dos dois serviços
               </p>
             </div>
@@ -312,7 +324,7 @@ export default function DashboardPage() {
               <CardTitle className="font-heading text-xl font-bold">
                 Fila de espera
               </CardTitle>
-              <p className="mt-1 text-xs font-medium text-haus-ink/65">
+              <p className="mt-1 text-sm font-medium text-haus-ink/65">
                 Ordem atual de atendimento
               </p>
             </div>
@@ -338,7 +350,7 @@ export default function DashboardPage() {
                   <p className="truncate text-sm font-semibold">
                     {entry.customerName}
                   </p>
-                  <p className="text-xs font-medium text-haus-ink/65">
+                  <p className="text-sm font-medium text-haus-ink/65">
                     {entry.partySize} pessoas ·{' '}
                     {entry.status === 'called' ? 'aguardou' : 'aguardando há'}{' '}
                     <span className="font-mono font-bold text-haus-ink">
