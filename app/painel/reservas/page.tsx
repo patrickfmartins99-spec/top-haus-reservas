@@ -271,8 +271,8 @@ export default function ReservationsPage() {
   }
 
   return (
-    <div className="mx-auto max-w-[1500px] space-y-6 p-5 sm:p-8">
-      <div className="flex flex-wrap items-end justify-between gap-4">
+    <div className="mx-auto max-w-[1500px] space-y-6 p-4 sm:p-6 lg:p-8">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <p className="text-xs font-bold uppercase tracking-[0.16em] text-haus-terracotta">
             Atendimento
@@ -287,7 +287,8 @@ export default function ReservationsPage() {
         <Link
           href="/painel/reservas/nova"
           className={buttonVariants({
-            className: 'bg-black text-white hover:bg-black/85',
+            className:
+              'h-11 w-full bg-black text-white hover:bg-black/85 sm:w-auto',
           })}
         >
           <Plus /> Nova reserva

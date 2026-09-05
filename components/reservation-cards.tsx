@@ -97,7 +97,7 @@ export function ReservationCards({
             </p>
           </details>
           {actions && (
-            <div className="flex flex-wrap gap-2 border-t border-black/10 pt-3">
+            <div className="flex flex-wrap gap-2 border-t border-black/10 pt-3 [&>*]:min-w-[8rem] [&>*]:flex-1 sm:[&>*]:flex-none">
               {actions(r)}
             </div>
           )}

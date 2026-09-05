@@ -188,7 +188,7 @@ export default function PendingTasksPage() {
   ).length;
 
   return (
-    <div className="mx-auto max-w-6xl space-y-6 p-4 sm:p-8">
+    <div className="mx-auto max-w-6xl space-y-6 p-4 sm:p-6 lg:p-8">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <p className="text-sm font-bold uppercase tracking-[0.14em] text-haus-terracotta">
@@ -417,7 +417,7 @@ export default function PendingTasksPage() {
                   <Clock3 className="size-3.5" /> {dateTime(task.createdAt)}
                 </p>
               </div>
-              <div className="flex flex-wrap gap-2 lg:max-w-[25rem] lg:justify-end">
+              <div className="flex w-full flex-wrap gap-2 lg:max-w-[25rem] lg:justify-end [&>*]:min-w-[7.5rem] [&>*]:flex-1 lg:[&>*]:flex-none">
                 <Link
                   href={task.href}
                   className={buttonVariants({

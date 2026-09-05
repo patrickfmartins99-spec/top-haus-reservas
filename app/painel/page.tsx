@@ -190,8 +190,8 @@ export default function DashboardPage() {
   }
 
   return (
-    <div className="mx-auto max-w-[1500px] space-y-7 p-5 sm:p-8">
-      <div className="flex flex-wrap items-center justify-between gap-4">
+    <div className="mx-auto max-w-[1500px] space-y-6 p-4 sm:p-6 lg:p-8">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <p className="text-xs font-bold uppercase tracking-[0.16em] text-haus-terracotta">
             Visão geral
@@ -204,12 +204,12 @@ export default function DashboardPage() {
             ou enviar mensagens.
           </p>
         </div>
-        <div className="flex flex-wrap gap-2">
+        <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto sm:flex-wrap">
           <Link
             href="/painel/pendencias"
             className={buttonVariants({
               variant: 'outline',
-              className: 'h-10 border-black/15 bg-white px-4',
+              className: 'h-11 border-black/15 bg-white px-3 sm:h-10 sm:px-4',
             })}
           >
             <ClipboardCheck className="size-4" /> Ver pendências
@@ -217,7 +217,7 @@ export default function DashboardPage() {
           <Link
             href="/painel/reservas/nova"
             className={buttonVariants({
-              className: 'h-10 bg-black px-4 text-white hover:bg-black/85',
+              className: 'h-11 bg-black px-3 text-white hover:bg-black/85 sm:h-10 sm:px-4',
             })}
           >
             <Plus className="size-4" /> Nova reserva

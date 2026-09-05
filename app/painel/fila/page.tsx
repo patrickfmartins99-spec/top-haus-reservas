@@ -265,8 +265,8 @@ export default function WaitlistPage() {
   }
 
   return (
-    <div className="mx-auto max-w-6xl space-y-6 p-5 sm:p-8">
-      <div className="flex flex-wrap items-end justify-between gap-4">
+    <div className="mx-auto max-w-6xl space-y-6 p-4 sm:p-6 lg:p-8">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <p className="text-xs font-bold uppercase tracking-[0.16em] text-haus-terracotta">
             Atendimento sem reserva
@@ -279,7 +279,7 @@ export default function WaitlistPage() {
           </p>
         </div>
         <Button
-          className="bg-black text-white hover:bg-black/85"
+          className="h-11 w-full bg-black text-white hover:bg-black/85 sm:w-auto"
           onClick={openNewEntry}
         >
           <Plus /> Adicionar à fila
@@ -400,7 +400,7 @@ export default function WaitlistPage() {
                       : `Aguardando há ${waitTime}`}
                   </p>
                 </div>
-                <div className="flex flex-wrap gap-2">
+                <div className="flex w-full flex-wrap gap-2 sm:w-auto [&>*]:min-w-[7.5rem] [&>*]:flex-1 sm:[&>*]:flex-none">
                   <Button
                     disabled={saving}
                     variant="outline"

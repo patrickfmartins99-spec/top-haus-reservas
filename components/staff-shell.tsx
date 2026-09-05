@@ -25,6 +25,7 @@ import {
   MessageCircle,
   LoaderCircle,
   LogOut,
+  Menu,
   Settings,
   UserCog,
 } from 'lucide-react';
@@ -60,6 +61,13 @@ const navigation = [
   { icon: UserCog, label: 'Usuários', href: '/painel/usuarios' },
   { icon: CalendarRange, label: 'Datas especiais', href: '/painel/calendario' },
   { icon: Settings, label: 'Configurações', href: '/painel/configuracoes' },
+];
+
+const mobilePrimaryNavigation = [
+  { icon: LayoutDashboard, label: 'Hoje', href: '/painel' },
+  { icon: ClipboardCheck, label: 'Pendências', href: '/painel/pendencias' },
+  { icon: CalendarDays, label: 'Reservas', href: '/painel/reservas' },
+  { icon: ListOrdered, label: 'Fila', href: '/painel/fila' },
 ];
 
 function isActive(pathname: string, href: string) {
@@ -248,6 +256,16 @@ export function StaffShell({ children }: { children: ReactNode }) {
       .map((part) => part[0])
       .join('')
       .toUpperCase() || 'TH';
+  const currentPageLabel =
+    visibleNavigation.find((item) => isActive(pathname, item.href))?.label ??
+    'Painel da equipe';
+  const adminMoreNavigation = visibleNavigation.filter(
+    (item) =>
+      !mobilePrimaryNavigation.some((primary) => primary.href === item.href),
+  );
+  const adminMoreActive = adminMoreNavigation.some((item) =>
+    isActive(pathname, item.href),
+  );
 
   return (
     <StaffSession.Provider value={{ profile, refresh: refreshProfile }}>
@@ -304,25 +322,23 @@ export function StaffShell({ children }: { children: ReactNode }) {
             </div>
           </aside>
 
-          <section className="min-w-0">
-            <header className="flex h-20 items-center justify-between border-b border-black/7 bg-white px-3 sm:px-8">
+          <section className="min-w-0 pb-[calc(5.25rem+env(safe-area-inset-bottom))] lg:pb-0">
+            <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-black/7 bg-white/95 px-4 shadow-[0_3px_14px_rgba(0,0,0,0.04)] backdrop-blur sm:px-6 lg:h-20 lg:px-8 lg:shadow-none">
               <div>
-                <p className="text-xs font-medium text-haus-ink/45">
+                <p className="hidden text-xs font-medium text-haus-ink/45 lg:block">
                   Painel da equipe
                 </p>
-                <p className="font-heading text-base font-bold sm:text-xl">
+                <p className="hidden font-heading text-xl font-bold lg:block">
                   Top Haus Reservas
+                </p>
+                <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-haus-terracotta lg:hidden">
+                  Top Haus Reservas
+                </p>
+                <p className="max-w-[11rem] truncate text-base font-extrabold leading-tight sm:max-w-none lg:hidden">
+                  {currentPageLabel}
                 </p>
               </div>
               <div className="flex items-center gap-2">
-                <button
-                  onClick={handleLogout}
-                  disabled={loggingOut}
-                  aria-label="Sair da conta"
-                  className="rounded-lg p-2 lg:hidden"
-                >
-                  <LogOut className="size-4" />
-                </button>
                 <Popover>
                   <PopoverTrigger
                     onClick={() => void loadNotifications()}
@@ -388,7 +404,7 @@ export function StaffShell({ children }: { children: ReactNode }) {
                 <Link
                   href="/painel/configuracoes"
                   aria-label="Configurações da minha conta"
-                  className="flex items-center gap-2 rounded-lg border border-black/15 p-2"
+                  className="flex items-center gap-2 rounded-xl border border-black/15 p-1.5 sm:p-2"
                 >
                   <span className="grid size-8 shrink-0 place-items-center overflow-hidden rounded-full bg-haus-terracotta text-xs font-bold text-white">
                     {profile.photo ? (
@@ -404,36 +420,115 @@ export function StaffShell({ children }: { children: ReactNode }) {
                       initials
                     )}
                   </span>
-                  <span className="hidden max-w-24 truncate text-sm sm:inline">
+                  <span className="hidden max-w-24 truncate text-sm md:inline">
                     {displayName}
                   </span>
-                  <Settings className="size-4" />
+                  <Settings className="hidden size-4 sm:block" />
                 </Link>
               </div>
             </header>
 
-            <nav
-              className="flex gap-2 overflow-x-auto border-b border-black/7 bg-white px-3 pb-3 lg:hidden"
-              aria-label="Navegação do painel"
-            >
-              {visibleNavigation.map(({ label, href }) => {
-                const active = isActive(pathname, href);
-                return (
-                  <Link
-                    key={href}
-                    href={href}
-                    aria-current={active ? 'page' : undefined}
-                    className={`whitespace-nowrap rounded-full px-4 py-2 text-xs font-bold transition ${active ? 'bg-black text-white' : 'bg-black/5 text-black/60 hover:bg-black/10'}`}
-                  >
-                    {label}
-                  </Link>
-                );
-              })}
-            </nav>
-
             {children}
           </section>
         </div>
+
+        <nav
+          className="fixed inset-x-0 bottom-0 z-40 border-t border-black/10 bg-white/95 pb-[max(0.4rem,env(safe-area-inset-bottom))] shadow-[0_-8px_30px_rgba(0,0,0,0.10)] backdrop-blur lg:hidden"
+          aria-label="Navegação principal no celular"
+        >
+          <div className="mx-auto grid max-w-lg grid-cols-5 gap-1 px-1.5 pt-1.5">
+            {mobilePrimaryNavigation.map(({ icon: Icon, label, href }) => {
+              const active = isActive(pathname, href);
+              const showBadge = href === '/painel/pendencias' && notifications.length > 0;
+              return (
+                <Link
+                  key={href}
+                  href={href}
+                  aria-current={active ? 'page' : undefined}
+                  className={`relative flex min-h-14 flex-col items-center justify-center gap-1 rounded-xl px-0.5 py-1.5 text-[9px] font-bold transition active:scale-[0.97] min-[360px]:px-1 min-[360px]:text-[10px] ${active ? 'bg-[#f1e5dc] text-haus-terracotta' : 'text-black/60'}`}
+                >
+                  <span className="relative">
+                    <Icon className="size-5" strokeWidth={active ? 2.6 : 2} />
+                    {showBadge ? (
+                      <span className="absolute -right-2 -top-1 grid min-h-4 min-w-4 place-items-center rounded-full bg-haus-terracotta px-1 text-[8px] font-extrabold text-white">
+                        {notifications.length > 9 ? '9+' : notifications.length}
+                      </span>
+                    ) : null}
+                  </span>
+                  <span className="whitespace-nowrap leading-none">{label}</span>
+                </Link>
+              );
+            })}
+
+            {profile.role === 'admin' ? (
+              <Popover>
+                <PopoverTrigger
+                  aria-label="Abrir mais opções"
+                  className={`flex min-h-14 w-full flex-col items-center justify-center gap-1 rounded-xl px-0.5 py-1.5 text-[9px] font-bold transition active:scale-[0.97] min-[360px]:px-1 min-[360px]:text-[10px] ${adminMoreActive ? 'bg-[#f1e5dc] text-haus-terracotta' : 'text-black/60'}`}
+                >
+                  <Menu className="size-5" strokeWidth={adminMoreActive ? 2.6 : 2} />
+                  Mais
+                </PopoverTrigger>
+                <PopoverContent
+                  side="top"
+                  align="end"
+                  sideOffset={10}
+                  className="w-[min(21rem,calc(100vw-1rem))] p-2"
+                >
+                  <PopoverHeader className="px-2 pb-2 pt-1">
+                    <PopoverTitle className="font-bold">Mais opções</PopoverTitle>
+                    <p className="text-xs text-black/60">
+                      Administração e configurações da conta.
+                    </p>
+                  </PopoverHeader>
+                  <div className="grid grid-cols-2 gap-1">
+                    {adminMoreNavigation.map(
+                      ({ icon: Icon, label, href }) => {
+                        const active = isActive(pathname, href);
+                        return (
+                          <Link
+                            key={href}
+                            href={href}
+                            aria-current={active ? 'page' : undefined}
+                            className={`flex min-h-12 items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold ${active ? 'bg-[#f1e5dc] text-haus-terracotta' : 'text-black/75 hover:bg-black/5'}`}
+                          >
+                            <Icon className="size-4 shrink-0" />
+                            {label}
+                          </Link>
+                        );
+                      },
+                    )}
+                  </div>
+                  <button
+                    onClick={handleLogout}
+                    disabled={loggingOut}
+                    className="mt-2 flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border border-black/10 text-sm font-bold text-black/70 disabled:opacity-50"
+                  >
+                    {loggingOut ? (
+                      <LoaderCircle className="size-4 animate-spin" />
+                    ) : (
+                      <LogOut className="size-4" />
+                    )}
+                    Sair da conta
+                  </button>
+                </PopoverContent>
+              </Popover>
+            ) : (
+              <Link
+                href="/painel/configuracoes"
+                aria-current={
+                  isActive(pathname, '/painel/configuracoes')
+                    ? 'page'
+                    : undefined
+                }
+                className={`flex min-h-14 flex-col items-center justify-center gap-1 rounded-xl px-0.5 py-1.5 text-[9px] font-bold transition active:scale-[0.97] min-[360px]:px-1 min-[360px]:text-[10px] ${isActive(pathname, '/painel/configuracoes') ? 'bg-[#f1e5dc] text-haus-terracotta' : 'text-black/60'}`}
+              >
+                <Settings className="size-5" />
+                Conta
+              </Link>
+            )}
+          </div>
+        </nav>
       </main>
     </StaffSession.Provider>
   );
