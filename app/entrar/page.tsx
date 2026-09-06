@@ -19,13 +19,23 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const [firebaseStatus, setFirebaseStatus] = useState<'checking' | 'connected' | 'not_configured' | 'error'>('checking');
+  const [firebaseStatus, setFirebaseStatus] = useState<
+    'checking' | 'connected' | 'not_configured' | 'quota_exceeded' | 'error'
+  >('checking');
 
   useEffect(() => {
     let active = true;
-    fetch('/api/status', { cache: 'no-store' })
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 6_000);
+    fetch('/api/status', { cache: 'no-store', signal: controller.signal })
       .then((response) => response.json())
-      .then((data: { firebase?: 'connected' | 'not_configured' | 'error' }) => {
+      .then((data: {
+        firebase?:
+          | 'connected'
+          | 'not_configured'
+          | 'quota_exceeded'
+          | 'error';
+      }) => {
         if (active) setFirebaseStatus(data.firebase ?? 'error');
       })
       .catch(() => {
@@ -33,6 +43,8 @@ export default function LoginPage() {
       });
     return () => {
       active = false;
+      window.clearTimeout(timeout);
+      controller.abort();
     };
   }, []);
 
@@ -101,6 +113,8 @@ export default function LoginPage() {
                     ? 'Firebase conectado e pronto'
                     : firebaseStatus === 'not_configured'
                       ? 'Firebase ainda não configurado no Netlify'
+                      : firebaseStatus === 'quota_exceeded'
+                        ? 'Limite diário do Firebase atingido'
                       : 'Não foi possível acessar o Firebase'}
               </div>
             </CardHeader>

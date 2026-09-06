@@ -2,7 +2,11 @@ import 'server-only';
 
 import { cert, getApps, initializeApp } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
-import { getFirestore } from 'firebase-admin/firestore';
+import { getFirestore, type Firestore } from 'firebase-admin/firestore';
+
+const firebaseAdminCache = globalThis as typeof globalThis & {
+  topHausAdminDatabase?: Firestore;
+};
 
 function hasAdminConfiguration() {
   return Boolean(
@@ -29,7 +33,16 @@ function getAdminApp() {
 
 export function getAdminDatabase() {
   const app = getAdminApp();
-  return app ? getFirestore(app) : null;
+  if (!app) return null;
+  if (firebaseAdminCache.topHausAdminDatabase)
+    return firebaseAdminCache.topHausAdminDatabase;
+
+  const database = getFirestore(app);
+  // Netlify Functions are short-lived. REST avoids long-lived gRPC channels
+  // hanging during a cold start or after the Firestore rejects a request.
+  database.settings({ preferRest: true });
+  firebaseAdminCache.topHausAdminDatabase = database;
+  return database;
 }
 
 export function getAdminAuthentication() {

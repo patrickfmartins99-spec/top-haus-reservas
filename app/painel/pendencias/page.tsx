@@ -130,7 +130,7 @@ export default function PendingTasksPage() {
 
   useEffect(() => {
     if (!user) return;
-    const timer = window.setInterval(() => void load(user, true), 60_000);
+    const timer = window.setInterval(() => void load(user, true), 300_000);
     const refresh = () => void load(user, true);
     window.addEventListener('focus', refresh);
     return () => {

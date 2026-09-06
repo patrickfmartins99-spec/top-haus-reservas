@@ -187,7 +187,7 @@ export function StaffShell({ children }: { children: ReactNode }) {
       navigator.serviceWorker?.removeEventListener('message', refresh);
       stopRealtime();
     };
-  }, [checkingSession, pathname]);
+  }, [checkingSession]);
 
   async function handleLogout() {
     const firebase = getFirebaseClient();
