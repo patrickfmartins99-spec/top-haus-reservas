@@ -4,3 +4,9 @@ publish = ".next"
 
 [build.environment]
 NODE_VERSION = "24"
+
+[[redirects]]
+from = "/painel/pendencias"
+to = "/painel"
+status = 301
+force = true
