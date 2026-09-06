@@ -15,7 +15,7 @@ const {
   positiveNumber,
 } = require('./messages');
 
-const ROBOT_VERSION = '2.1.0';
+const ROBOT_VERSION = '2.2.0';
 const CHECK_ONLY = process.argv.includes('--verificar-whatsapp');
 let releaseInstance = async () => {};
 let stopping = false;
@@ -26,7 +26,11 @@ const SEND_DELAY_MAX_MS = Math.max(
   SEND_DELAY_MIN_MS,
   positiveNumber(process.env.SEND_DELAY_MAX_MS, 10000),
 );
-const POLL_INTERVAL_MS = positiveNumber(process.env.POLL_INTERVAL_MS, 2000);
+const HEARTBEAT_INTERVAL_MS = positiveNumber(
+  process.env.HEARTBEAT_INTERVAL_MS,
+  300000,
+);
+const LISTENER_RETRY_MS = 300000;
 const MAX_PENDING_AGE_HOURS = positiveNumber(
   process.env.MAX_PENDING_AGE_HOURS,
   24,
@@ -63,8 +67,8 @@ db.settings({ preferRest: true });
 const queue = [];
 const queuedIds = new Set();
 let processing = false;
-let pollingTimer = null;
-let polling = false;
+let queueUnsubscribe = null;
+let listenerRetryTimer = null;
 let whatsappReady = false;
 let whatsappStateTimer = null;
 let heartbeatTimer = null;
@@ -188,7 +192,7 @@ function markWhatsappReady(source) {
     shutdown('verificação concluída');
     return;
   }
-  startQueuePolling();
+  startQueueListener();
 }
 
 async function checkWhatsappState() {
@@ -249,10 +253,6 @@ client.on('disconnected', (reason) => {
     whatsappConnected: false,
     lastError: String(reason).slice(0, 300),
   });
-  if (pollingTimer) {
-    clearInterval(pollingTimer);
-    pollingTimer = null;
-  }
 });
 
 function timestampMilliseconds(value) {
@@ -262,58 +262,69 @@ function timestampMilliseconds(value) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function startQueuePolling() {
-  if (pollingTimer || stopping || CHECK_ONLY) return;
-  console.log(
-    `👀 Consultando novas mensagens a cada ${POLL_INTERVAL_MS / 1000} segundo(s)`,
-  );
-  pollQueue();
-  pollingTimer = setInterval(pollQueue, POLL_INTERVAL_MS);
+function ignoreOldEvent(document) {
+  void document.ref
+    .update({
+      status: 'ignored',
+      ignoredReason: `Mensagem pendente há mais de ${MAX_PENDING_AGE_HOURS} hora(s).`,
+      processedAt: admin.firestore.FieldValue.serverTimestamp(),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    })
+    .then(() =>
+      console.log(`ℹ️ Evento antigo ${document.id} marcado como ignorado.`),
+    )
+    .catch((error) =>
+      console.error(`❌ Não foi possível ignorar ${document.id}:`, error.message),
+    );
 }
 
-async function pollQueue() {
-  if (polling || stopping || CHECK_ONLY) return;
-  polling = true;
+function startQueueListener() {
+  if (queueUnsubscribe || stopping || CHECK_ONLY) return;
+  console.log('👂 Monitoramento por eventos ativado — sem consultas a cada 2 segundos.');
 
-  try {
-    if (!(await checkSendReadiness())) return;
-    const snapshot = await db
-      .collection('whatsappQueue')
-      .where('status', 'in', ['pending', 'manual_pending'])
-      .limit(100)
-      .get();
-    pendingCount = snapshot.size;
-    firebaseConnected = true;
+  queueUnsubscribe = db
+    .collection('whatsappQueue')
+    .where('status', 'in', ['pending', 'manual_pending'])
+    .limit(100)
+    .onSnapshot(
+      (snapshot) => {
+        pendingCount = snapshot.size;
+        firebaseConnected = true;
 
-    for (const document of snapshot.docs) {
-      const data = document.data();
-      const createdAt = timestampMilliseconds(data.createdAt);
-      const ageHours = createdAt > 0 ? (Date.now() - createdAt) / 3600000 : 0;
+        for (const change of snapshot.docChanges()) {
+          if (change.type === 'removed') continue;
+          const document = change.doc;
+          const data = document.data();
+          const createdAt = timestampMilliseconds(data.createdAt);
+          const ageHours =
+            createdAt > 0 ? (Date.now() - createdAt) / 3600000 : 0;
 
-      if (ageHours > MAX_PENDING_AGE_HOURS) {
-        await document.ref.update({
-          status: 'ignored',
-          ignoredReason: `Mensagem pendente há mais de ${MAX_PENDING_AGE_HOURS} hora(s).`,
-          processedAt: admin.firestore.FieldValue.serverTimestamp(),
-          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-        });
-        console.log(`ℹ️ Evento antigo ${document.id} marcado como ignorado.`);
-        continue;
-      }
+          if (ageHours > MAX_PENDING_AGE_HOURS) {
+            ignoreOldEvent(document);
+            continue;
+          }
 
-      enqueueEvent(document.id, data, createdAt);
-    }
+          enqueueEvent(document.id, data, createdAt);
+        }
 
-    processQueue();
-  } catch (error) {
-    firebaseConnected = false;
-    console.error(
-      '❌ Erro ao consultar o Firestore. Nova tentativa será feita automaticamente:',
-      error.message,
+        void processQueue();
+      },
+      (error) => {
+        firebaseConnected = false;
+        queueUnsubscribe = null;
+        console.error(
+          '❌ O monitoramento do Firestore foi interrompido:',
+          error.message,
+        );
+        if (!stopping && !listenerRetryTimer) {
+          console.log('⏱️ Nova conexão com o Firestore em 5 minutos.');
+          listenerRetryTimer = setTimeout(() => {
+            listenerRetryTimer = null;
+            if (whatsappReady) startQueueListener();
+          }, LISTENER_RETRY_MS);
+        }
+      },
     );
-  } finally {
-    polling = false;
-  }
 }
 
 function enqueueEvent(id, data, createdAt) {
@@ -464,11 +475,15 @@ const shutdown = createShutdown({
   stopWork: () => {
     stopping = true;
     whatsappReady = false;
-    clearInterval(pollingTimer);
+    if (queueUnsubscribe) {
+      queueUnsubscribe();
+      queueUnsubscribe = null;
+    }
     clearInterval(whatsappStateTimer);
     clearInterval(heartbeatTimer);
     clearInterval(dailyReviewTimer);
     clearTimeout(checkTimeout);
+    clearTimeout(listenerRetryTimer);
     void writeRobotStatus({
       status: 'stopped',
       whatsappConnected: false,
@@ -509,7 +524,7 @@ async function startRobot() {
     status: 'starting',
     startedAt: admin.firestore.FieldValue.serverTimestamp(),
   });
-  heartbeatTimer = setInterval(heartbeat, 60_000);
+  heartbeatTimer = setInterval(heartbeat, HEARTBEAT_INTERVAL_MS);
   dailyReviewTimer = setInterval(runDailyReviewIfDue, 60_000);
   await runDailyReviewIfDue();
 
