@@ -126,6 +126,7 @@ function load(file) {
   return module.exports;
 }
 const domain = load('lib/domain/reservations.ts');
+const reservationCodes = load('lib/domain/reservation-code.ts');
 const specialDates = load('lib/domain/special-dates.ts');
 const outcomes = load('lib/domain/service-outcomes.ts');
 const reporting = load('lib/domain/reporting.ts');
@@ -137,9 +138,6 @@ const waitlistOutcomeRoute = load('app/api/fila/[id]/route.ts');
 const notifications = load('lib/firebase/reservation-notifications.ts');
 const staffPush = load('lib/firebase/staff-push.ts');
 const clientRoute = load('app/api/minha-reserva/route.ts');
-const customerNotificationsRoute = load(
-  'app/api/cliente/notificacoes/route.ts',
-);
 const staffPushRoute = load('app/api/equipe/notificacoes/route.ts');
 const input = {
   service: 'rodizio',
@@ -157,7 +155,7 @@ function fixture(status = 'confirmed') {
     ...input,
     status,
     tableLabel: '',
-    confirmationTokenHash: notifications.hash('a'.repeat(48)),
+    reservationCode: '0000121226',
   });
   db.data.set('serviceCapacity/2026-12-12_rodizio', {
     heldSeats: status === 'cancelled' ? 6 : 10,
@@ -242,7 +240,7 @@ test('exceção normaliza abertura, capacidade, horários e aviso', () => {
   assert.equal(normalized.bookingPaused, true);
   assert.equal(normalized.customerNotice, 'Horário especial de Natal.');
 });
-test('exclusão libera capacidade uma única vez e mantém auditoria e sino', async () => {
+test('exclusão libera capacidade uma única vez e mantém auditoria da equipe', async () => {
   fixture();
   await deletion.deleteReservation(db, 'r1', {
     type: 'staff',
@@ -270,10 +268,10 @@ test('exclusão libera capacidade uma única vez e mantém auditoria e sino', as
   assert.equal(event.status, 'manual_pending');
   assert.equal(event.eventType, 'reservation_cancelled');
   assert.equal(
-    [...db.data.keys()].filter((key) =>
+    [...db.data.keys()].some((key) =>
       key.startsWith('reservations/r1/notifications/'),
-    ).length,
-    1,
+    ),
+    false,
   );
 });
 test('excluir reserva já cancelada não libera capacidade novamente', async () => {
@@ -419,22 +417,17 @@ test('criação de rodízio após prazo é barrada no servidor', async () => {
   assert.equal(response.status, 400);
   assert.match((await response.json()).error, /18h/);
 });
-test('token de notificação só permite sua própria reserva', async () => {
-  fixture();
-  const token = 'a'.repeat(48);
-  assert.deepEqual(
-    await notifications.verifiedAccess(db, [{ id: 'r1', token }]),
-    ['r1'],
+test('código da reserva usa os quatro últimos dígitos e a data', () => {
+  assert.equal(
+    reservationCodes.createReservationCode('985307465', '2026-09-07'),
+    '7465070926',
   );
-  assert.deepEqual(
-    await notifications.verifiedAccess(db, [
-      { id: 'r1', token: 'b'.repeat(48) },
-    ]),
-    [],
-  );
-  assert.deepEqual(
-    await notifications.verifiedAccess(db, [{ id: '../r1', token }]),
-    [],
+  assert.equal(
+    reservationCodes.reservationCode(
+      { whatsapp: '985307465', serviceDate: '2026-09-07' },
+      'id-interno',
+    ),
+    '7465070926',
   );
 });
 test('push rejeita destino arbitrário e chaves inválidas', () => {
@@ -497,19 +490,6 @@ test('fila sem estimativa, chamada de três minutos e DDD55 correto', () => {
   assert.equal(messages.normalizeWhatsApp('55999990000'), '5555999990000');
 });
 
-test('cliente não pode cadastrar push nem consultar a chave de envio', async () => {
-  fixture();
-  for (const action of ['config', 'subscribe', 'unsubscribe']) {
-    const result = await customerNotificationsRoute.POST(
-      request('POST', {
-        action,
-        accesses: [{ id: 'r1', token: 'a'.repeat(48) }],
-      }),
-    );
-    assert.equal(result.status, 400);
-  }
-  assert.equal(db.data.size, 2);
-});
 test('notificações móveis exigem sessão de colaborador', async () => {
   fixture();
   staff = null;
@@ -547,7 +527,7 @@ test('colaborador cadastra somente seu aparelho; outro usuário não pode assumi
       409,
     );
 });
-test('evento da reserva gera push só da equipe e aviso interno do cliente', async () => {
+test('evento da reserva gera aviso somente para a equipe', async () => {
   fixture();
   await deletion.deleteReservation(db, 'r1', {
     type: 'staff',
@@ -562,11 +542,12 @@ test('evento da reserva gera push só da equipe e aviso interno do cliente', asy
   assert.equal(event.title, 'Reserva cancelada por Patrick');
   assert.match(event.description, /Cliente Teste · 4 pessoas/);
   assert.match(event.href, /^\/painel\//);
-  const customerEvent = [...db.data.entries()].find(([key]) =>
-    key.startsWith('reservations/r1/notifications/'),
-  )[1];
-  assert.equal(customerEvent.channel, 'in_app');
-  assert.equal(customerEvent.pushStatus, undefined);
+  assert.equal(
+    [...db.data.keys()].some((key) =>
+      key.startsWith('reservations/r1/notifications/'),
+    ),
+    false,
+  );
   assert.equal(
     [...db.data.keys()].some((key) => key.includes('pushSubscriptions')),
     false,

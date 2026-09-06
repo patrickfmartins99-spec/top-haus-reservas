@@ -16,6 +16,10 @@ import {
   RESERVATION_NO_SHOW_REASONS,
 } from '@/lib/domain/service-outcomes';
 import { getOperationalSettings } from '@/lib/domain/operational-settings';
+import {
+  createReservationCode,
+  reservationCode,
+} from '@/lib/domain/reservation-code';
 import { getAdminDatabase } from '@/lib/firebase/admin';
 import { type WhatsAppEventType } from '@/lib/firebase/whatsapp-outbox';
 import {
@@ -236,7 +240,7 @@ export async function PATCH(
             serviceDate: String(previous.serviceDate ?? ''),
             arrivalTime: String(previous.arrivalTime ?? ''),
             partySize: Number(previous.partySize ?? 0),
-            reservationCode: id,
+            reservationCode: reservationCode(previous, id),
             fromStatus: previousStatus,
             toStatus: status,
           },
@@ -526,6 +530,10 @@ export async function PATCH(
         serviceDate: payload.serviceDate,
         arrivalTime: payload.arrivalTime,
         notes: payload.notes?.trim().slice(0, 1000) ?? '',
+        reservationCode: createReservationCode(
+          nextWhatsapp,
+          payload.serviceDate,
+        ),
         status,
       };
 
@@ -642,7 +650,7 @@ export async function PATCH(
             arrivalTime: updatedReservation.arrivalTime,
             partySize: updatedReservation.partySize,
             notes: updatedReservation.notes,
-            reservationCode: id,
+            reservationCode: updatedReservation.reservationCode,
             lateToleranceMinutes: settings.lateToleranceMinutes,
             fromStatus: previousStatus,
             toStatus: status,

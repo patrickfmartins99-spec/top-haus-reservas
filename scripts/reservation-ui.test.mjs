@@ -20,6 +20,7 @@ const today = new Intl.DateTimeFormat('en-CA', {
 }).format(new Date());
 const reservation = {
   id: 'teste-ui',
+  reservationCode: '0000060926',
   customerName: 'Mariana Teste',
   whatsapp: '47999990000',
   partySize: 4,
@@ -215,8 +216,8 @@ page.on('request', async (request) => {
   if (url.pathname === '/api/reservas' && request.method() === 'POST')
     return reply({
       id: reservation.id,
+      reservationCode: reservation.reservationCode,
       status: 'confirmed',
-      token: 'a'.repeat(48),
     });
   if (
     url.pathname === '/api/reservas/teste-ui' &&
@@ -238,20 +239,7 @@ page.on('request', async (request) => {
     deleted = true;
     return reply({ ok: true });
   }
-  if (url.pathname === '/api/minha-reserva')
-    return reply({ reservation, notificationToken: 'b'.repeat(64) });
-  if (url.pathname === '/api/cliente/notificacoes')
-    return reply({
-      items: [
-        {
-          id: 'notification-1',
-          reservationId: reservation.id,
-          title: 'Reserva confirmada',
-          body: message.message,
-          createdAt: message.createdAt,
-        },
-      ],
-    });
+  if (url.pathname === '/api/minha-reserva') return reply({ reservation });
   if (url.pathname === '/api/fila/fila-test') {
     queueOutcome = body.status;
     queueEntry.status = body.status;
@@ -311,15 +299,8 @@ try {
   await page.type('#whatsapp', '47999990000');
   await click('Confirmar reserva');
   await waitText('Reserva confirmada!');
-  await page.click('button[aria-label^="Notificações:"]');
-  await waitText('Suas notificações');
-  await waitText(message.message);
-  assert.equal(
-    await page.evaluate(() =>
-      document.body.innerText.includes('Ativar no celular'),
-    ),
-    false,
-  );
+  await waitText(reservation.reservationCode);
+  assert.equal(await page.$('button[aria-label^="Notificações:"]'), null);
   await page.screenshot({
     path: new URL('cliente-notificacoes.png', output).pathname.replace(
       /^\/(\w:)/,
@@ -327,7 +308,7 @@ try {
     ),
     fullPage: true,
   });
-  console.log('PASS: reserva de cliente e sino, viewport celular.');
+  console.log('PASS: reserva de cliente sem sino e com código curto.');
   await page.goto(`${base}/entrar`, {
     waitUntil: 'networkidle0',
   });

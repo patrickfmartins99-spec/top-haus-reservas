@@ -9,6 +9,7 @@ import {
   RESERVATION_CANCELLATION_REASONS,
 } from '@/lib/domain/service-outcomes';
 import { enqueueReservationEvent } from '@/lib/firebase/reservation-notifications';
+import { reservationCode } from '@/lib/domain/reservation-code';
 
 // Exclusão lógica: remove da operação, mas mantém a trilha de auditoria.
 export async function deleteReservation(
@@ -112,7 +113,7 @@ export async function deleteReservation(
         arrivalTime: data.arrivalTime,
         partySize: data.partySize,
         service: data.service,
-        reservationCode: id,
+        reservationCode: reservationCode(data, id),
         deleted: true,
       },
       staffNotification: {

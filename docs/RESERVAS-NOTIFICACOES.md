@@ -33,7 +33,7 @@ Somente o sino dentro do site, sem pedido de permissão e sem envio para o celul
 
 ## Implementação e permissões
 
-Coleções privadas: `staffPushSubscriptions`, `staffNotifications`, `systemSecrets`, `customerNotificationAccess` e subcoleções de notificações de reservas. Clientes não têm rota de cadastro de push. As chaves Web Push são geradas pelo servidor na primeira ativação autorizada e guardadas em `systemSecrets/webPush`; a chave privada nunca sai do servidor.
+Coleções privadas: `staffPushSubscriptions`, `staffNotifications` e `systemSecrets`. O cliente não possui sino nem cadastro de notificações; as atualizações dele seguem pelo WhatsApp. As chaves Web Push da equipe são geradas pelo servidor na primeira ativação autorizada e guardadas em `systemSecrets/webPush`; a chave privada nunca sai do servidor.
 
 As regras publicadas foram consultadas e o bloqueio padrão cobre essas coleções. As sondagens REST sem autenticação retornaram 403. Nenhuma regra foi relaxada. O script `scripts/check-published-rules.mjs` faz somente leituras.
 

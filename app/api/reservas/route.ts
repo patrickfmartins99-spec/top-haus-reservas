@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash } from 'node:crypto';
 
 import { FieldValue, type DocumentData } from 'firebase-admin/firestore';
 import { after, NextResponse } from 'next/server';
@@ -12,6 +12,10 @@ import {
 } from '@/lib/domain/reservations';
 import { requireStaff } from '@/lib/auth/staff-request';
 import { getOperationalSettings } from '@/lib/domain/operational-settings';
+import {
+  createReservationCode,
+  reservationCode,
+} from '@/lib/domain/reservation-code';
 import { getAdminDatabase } from '@/lib/firebase/admin';
 import {
   enqueueReservationEvent,
@@ -37,6 +41,7 @@ function serializeReservation(document: {
   const data = document.data() ?? {};
   return {
     id: document.id,
+    reservationCode: reservationCode(data, document.id),
     customerName: String(data.customerName ?? ''),
     whatsapp: String(data.whatsapp ?? ''),
     partySize: Number(data.partySize ?? 0),
@@ -185,7 +190,10 @@ export async function POST(request: Request) {
       { status: 400 },
     );
   }
-  const token = randomBytes(24).toString('hex');
+  const publicReservationCode = createReservationCode(
+    normalizedWhatsapp,
+    payload.serviceDate,
+  );
   const status =
     payload.partySize <= settings.autoApprovalLimit
       ? 'confirmed'
@@ -291,11 +299,11 @@ export async function POST(request: Request) {
         partySize: payload.partySize,
         customerName: payload.customerName.trim(),
         whatsapp: normalizedWhatsapp,
+        reservationCode: publicReservationCode,
         notes: payload.notes?.trim().slice(0, 1000) ?? '',
         status,
         source: staffContext ? 'staff_phone' : 'customer_web',
         createdBy: staffContext?.decodedToken.uid ?? null,
-        confirmationTokenHash: createHash('sha256').update(token).digest('hex'),
         createdAt: FieldValue.serverTimestamp(),
         updatedAt: FieldValue.serverTimestamp(),
       });
@@ -330,7 +338,7 @@ export async function POST(request: Request) {
           serviceDate: payload.serviceDate,
           arrivalTime: payload.arrivalTime,
           partySize: payload.partySize,
-          reservationCode: reservationRef.id,
+          reservationCode: publicReservationCode,
           status,
           lateToleranceMinutes: settings.lateToleranceMinutes,
         },
@@ -396,7 +404,11 @@ export async function POST(request: Request) {
 
   after(() => dispatchReservationPush(database, reservationRef.id));
   return NextResponse.json(
-    { id: reservationRef.id, token, status },
+    {
+      id: reservationRef.id,
+      reservationCode: publicReservationCode,
+      status,
+    },
     { status: 201 },
   );
 }

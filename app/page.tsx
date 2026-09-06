@@ -16,8 +16,6 @@ import {
   Users,
 } from 'lucide-react';
 
-import { CustomerNotifications } from '@/components/customer-notifications';
-import { rememberReservation } from '@/lib/customer-notifications-client';
 import {
   minimumBookingDate,
   brazilDate,
@@ -72,9 +70,10 @@ export default function Home() {
   const [whatsapp, setWhatsapp] = useState('');
   const [notes, setNotes] = useState('');
   const [submitting, setSubmitting] = useState(false);
-  const [result, setResult] = useState<{ id: string; status: string } | null>(
-    null,
-  );
+  const [result, setResult] = useState<{
+    reservationCode: string;
+    status: string;
+  } | null>(null);
   const [error, setError] = useState('');
   const [settings, setSettings] = useState<OperationalSettings>(
     DEFAULT_OPERATIONAL_SETTINGS,
@@ -196,7 +195,6 @@ export default function Home() {
       if (!response.ok)
         throw new Error(data.error ?? 'Não foi possível concluir a reserva.');
       setResult(data);
-      rememberReservation(data.id, data.token);
     } catch (caughtError) {
       setError(
         caughtError instanceof Error
@@ -226,7 +224,6 @@ export default function Home() {
             </span>
           </a>
           <div className="flex items-center gap-2">
-            <CustomerNotifications />
             <Link
               href="/minha-reserva"
               className="flex items-center gap-2 rounded-full border border-white/15 px-4 py-2 text-sm font-medium text-white/85 transition hover:border-haus-gold/60 hover:text-white"
@@ -315,15 +312,12 @@ export default function Home() {
                       ? 'Guarde o código abaixo. Com ele e seu WhatsApp, você pode consultar ou alterar a reserva.'
                       : 'A equipe do Top Haus analisará o grupo. Guarde o código para acompanhar a solicitação.'}
                   </p>
-                  <p className="mt-3 text-sm font-semibold text-black/80">
-                    Acompanhe as atualizações pelo sino de notificações do site.
-                  </p>
                   <p className="mt-5 break-all rounded-xl bg-black px-4 py-3 font-mono text-sm font-bold text-white">
-                    Código {result.id}
+                    Código {result.reservationCode}
                   </p>
                   <div className="mt-6 flex flex-wrap justify-center gap-3">
                     <Link
-                      href={`/minha-reserva?codigo=${encodeURIComponent(result.id)}`}
+                      href={`/minha-reserva?codigo=${encodeURIComponent(result.reservationCode)}`}
                       className="inline-flex h-8 items-center justify-center rounded-lg border border-black/15 px-3 text-sm font-semibold hover:bg-black/5"
                     >
                       Consultar esta reserva

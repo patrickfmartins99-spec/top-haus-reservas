@@ -14,9 +14,12 @@ import {
 } from '@/lib/domain/reservations';
 import { getAdminDatabase } from '@/lib/firebase/admin';
 import {
+  createReservationCode,
+  reservationCode,
+} from '@/lib/domain/reservation-code';
+import {
   enqueueReservationEvent,
   dispatchReservationPush,
-  issueNotificationAccess,
 } from '@/lib/firebase/reservation-notifications';
 import { deleteReservation } from '@/lib/firebase/delete-reservation';
 
@@ -54,7 +57,7 @@ function serializeReservation(
     deadline.getTime() >= Date.now() &&
     !['cancelled', 'completed', 'no_show', 'seated'].includes(status);
   return {
-    id,
+    id: reservationCode(data, id),
     customerName: text(data.customerName),
     whatsapp: text(data.whatsapp),
     partySize: Number(data.partySize ?? 0),
@@ -80,15 +83,31 @@ async function findReservation(code: unknown, whatsapp: unknown) {
     normalizedWhatsapp.length < 10
   )
     return { error: 'INVALID' as const };
-  const reference = database.collection('reservations').doc(normalizedCode);
-  const snapshot = await reference.get();
+  const collection = database.collection('reservations');
+  let reference = collection.doc(normalizedCode);
+  let snapshot = await reference.get();
   if (
-    !snapshot.exists ||
-    snapshot.data()?.deletedAt ||
-    digits(snapshot.data()?.whatsapp) !== normalizedWhatsapp
-  )
-    return { error: 'NOT_FOUND' as const };
-  return { database, reference, snapshot, data: snapshot.data() ?? {} };
+    snapshot.exists &&
+    !snapshot.data()?.deletedAt &&
+    digits(snapshot.data()?.whatsapp) === normalizedWhatsapp
+  ) {
+    return { database, reference, snapshot, data: snapshot.data() ?? {} };
+  }
+
+  const candidates = await collection
+    .where('whatsapp', '==', normalizedWhatsapp)
+    .limit(50)
+    .get();
+  const match = candidates.docs.find((document) => {
+    const data = document.data();
+    return (
+      !data.deletedAt && reservationCode(data, document.id) === normalizedCode
+    );
+  });
+  if (!match) return { error: 'NOT_FOUND' as const };
+  reference = collection.doc(match.id);
+  snapshot = match;
+  return { database, reference, snapshot, data: match.data() ?? {} };
 }
 
 function lookupError(error: 'FIREBASE' | 'INVALID' | 'NOT_FOUND') {
@@ -119,13 +138,8 @@ export async function POST(request: Request) {
   const result = await findReservation(payload?.code, payload?.whatsapp);
   if (result.error) return lookupError(result.error);
   const settings = await getOperationalSettings(result.database);
-  const notificationToken = await issueNotificationAccess(
-    result.database,
-    result.reference.id,
-  );
   return NextResponse.json(
     {
-      notificationToken,
       reservation: serializeReservation(
         result.reference.id,
         result.data,
@@ -228,7 +242,7 @@ export async function PATCH(request: Request) {
             serviceDate: fresh.serviceDate,
             arrivalTime: fresh.arrivalTime,
             partySize: fresh.partySize,
-            reservationCode: result.reference.id,
+            reservationCode: reservationCode(fresh, result.reference.id),
             lateToleranceMinutes: settings.lateToleranceMinutes,
           },
           staffNotification: { actorType: 'customer' },
@@ -308,7 +322,7 @@ export async function PATCH(request: Request) {
           whatsapp: String(freshData.whatsapp ?? ''),
           payload: {
             customerName: String(freshData.customerName ?? ''),
-            reservationCode: result.reference.id,
+            reservationCode: reservationCode(freshData, result.reference.id),
             service: String(freshData.service ?? ''),
             serviceDate: String(freshData.serviceDate ?? ''),
             arrivalTime: String(freshData.arrivalTime ?? ''),
@@ -559,6 +573,10 @@ export async function PATCH(request: Request) {
           serviceDate: reservation.serviceDate,
           arrivalTime: reservation.arrivalTime,
           notes: reservation.notes?.trim().slice(0, 1000) ?? '',
+          reservationCode: createReservationCode(
+            digits(reservation.whatsapp),
+            reservation.serviceDate,
+          ),
           status: nextStatus,
         };
         transaction.update(result.reference, {
@@ -600,7 +618,7 @@ export async function PATCH(request: Request) {
             payload: {
               customerName: updated.customerName,
               whatsapp: updated.whatsapp,
-              reservationCode: result.reference.id,
+              reservationCode: updated.reservationCode,
               lateToleranceMinutes: settings.lateToleranceMinutes,
               service: updated.service,
               serviceDate: updated.serviceDate,

@@ -51,6 +51,7 @@ import {
 
 type Reservation = {
   id: string;
+  reservationCode: string;
   customerName: string;
   whatsapp: string;
   partySize: number;
@@ -219,6 +220,7 @@ export default function ReservationsPage() {
           !term ||
           reservation.customerName.toLowerCase().includes(term) ||
           reservation.whatsapp.includes(term) ||
+          reservation.reservationCode.toLowerCase().includes(term) ||
           reservation.id.toLowerCase().includes(term);
         const matchesDate =
           !dateFilter || reservation.serviceDate === dateFilter;
@@ -577,8 +579,8 @@ export default function ReservationsPage() {
                   Editar reserva
                 </DialogTitle>
                 <DialogDescription className="text-black/65">
-                  Código {editingReservation.id}. As alterações ficarão
-                  registradas na auditoria.
+                  Código {editingReservation.reservationCode}. As alterações
+                  ficarão registradas na auditoria.
                 </DialogDescription>
               </DialogHeader>
               {error ? (

@@ -132,7 +132,9 @@ export default function NewReservationPage() {
       const data = await response.json();
       if (!response.ok)
         throw new Error(data.error ?? 'Não foi possível criar a reserva.');
-      router.push(`/painel/reservas?criada=${encodeURIComponent(data.id)}`);
+      router.push(
+        `/painel/reservas?criada=${encodeURIComponent(data.reservationCode)}`,
+      );
     } catch (caughtError) {
       setError(
         caughtError instanceof Error

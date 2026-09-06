@@ -1,7 +1,6 @@
 import 'server-only';
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import {
-  FieldValue,
   type Firestore,
   type DocumentReference,
   type DocumentData,
@@ -15,7 +14,6 @@ import {
   enqueueStaffNotification,
   dispatchStaffNotifications,
 } from '@/lib/firebase/staff-push';
-import { customerMessage, messageTitles } from '@/lib/whatsapp';
 
 export function enqueueReservationEvent(
   db: Firestore,
@@ -37,67 +35,10 @@ export function enqueueReservationEvent(
         }
       : undefined,
   });
-  writer.set(
-    db
-      .collection('reservations')
-      .doc(input.entityId)
-      .collection('notifications')
-      .doc(event.id),
-    {
-      title: messageTitles[input.eventType] ?? 'Atualização da reserva',
-      body: customerMessage(input.eventType, input.payload),
-      eventType: input.eventType,
-      createdAt: FieldValue.serverTimestamp(),
-      channel: 'in_app',
-    },
-  );
-}
-
-export async function issueNotificationAccess(
-  db: Firestore,
-  reservationId: string,
-) {
-  const token = randomBytes(32).toString('hex');
-  await db
-    .collection('customerNotificationAccess')
-    .doc(hash(token))
-    .set({ reservationId, expiresAt: Date.now() + 400 * 86_400_000 });
-  return token;
 }
 
 export function hash(value: string) {
   return createHash('sha256').update(value).digest('hex');
-}
-
-export async function verifiedAccess(db: Firestore, value: unknown) {
-  if (!Array.isArray(value) || value.length > 20) return [];
-  const ids = await Promise.all(
-    value.map(async (item: { id?: unknown; token?: unknown }) => {
-      if (
-        !item ||
-        typeof item.id !== 'string' ||
-        !/^[a-zA-Z0-9_-]{1,128}$/.test(item.id) ||
-        typeof item.token !== 'string' ||
-        !/^[a-f0-9]{48,64}$/.test(item.token)
-      )
-        return null;
-      const [reservation, access] = await Promise.all([
-        db.collection('reservations').doc(item.id).get(),
-        db.collection('customerNotificationAccess').doc(hash(item.token)).get(),
-      ]);
-      if (!reservation.exists) return null;
-      const data = reservation.data()!;
-      const date = new Date(`${data.serviceDate}T23:59:59-03:00`).getTime();
-      if (!Number.isFinite(date) || Date.now() > date + 30 * 86_400_000)
-        return null;
-      return data.confirmationTokenHash === hash(item.token) ||
-        (access.data()?.reservationId === item.id &&
-          access.data()!.expiresAt > Date.now())
-        ? item.id
-        : null;
-    }),
-  );
-  return [...new Set(ids.filter((id): id is string => Boolean(id)))];
 }
 
 // Persistent, server-only keys. Never expose the private key in an API or client bundle.
