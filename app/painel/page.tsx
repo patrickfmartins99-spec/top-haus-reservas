@@ -1,11 +1,10 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { onAuthStateChanged, type User } from 'firebase/auth';
 import {
   CalendarDays,
-  ClipboardCheck,
   CheckCircle2,
   ClipboardList,
   Clock3,
@@ -17,6 +16,7 @@ import {
 } from 'lucide-react';
 
 import { ReasonDialog } from '@/components/reason-dialog';
+import { OfflineModeBanner } from '@/components/offline-mode-banner';
 import { ReservationCards } from '@/components/reservation-cards';
 import { Badge } from '@/components/ui/badge';
 import { Button, buttonVariants } from '@/components/ui/button';
@@ -27,6 +27,12 @@ import {
 } from '@/lib/domain/waitlist-time';
 import { RESERVATION_NO_SHOW_REASONS } from '@/lib/domain/service-outcomes';
 import { getFirebaseClient } from '@/lib/firebase/client';
+import { fetchWithTimeout } from '@/lib/client/fetch-with-timeout';
+import {
+  cacheBelongsToToday,
+  readStaffCache,
+  writeStaffCache,
+} from '@/lib/offline/staff-cache';
 
 type Reservation = {
   id: string;
@@ -62,9 +68,56 @@ export default function DashboardPage() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [actionBusy, setActionBusy] = useState(false);
+  const [offlineSavedAt, setOfflineSavedAt] = useState<string | null>(null);
   const [noShowReservation, setNoShowReservation] =
     useState<Reservation | null>(null);
   const [now, setNow] = useState(() => Date.now());
+
+  const loadLiveData = useCallback(async (user: User) => {
+    const token = await user.getIdToken();
+    const headers = { Authorization: `Bearer ${token}` };
+    const today = localDate();
+    const [reservationsResponse, queueResponse] = await Promise.all([
+      fetchWithTimeout(`/api/reservas?data=${today}`, { headers }),
+      fetchWithTimeout('/api/fila?ativas=1', { headers }),
+    ]);
+    const reservationsData = await reservationsResponse.json();
+    const queueData = await queueResponse.json();
+    if (!reservationsResponse.ok)
+      throw new Error(
+        reservationsData.error ?? 'Não foi possível carregar as reservas.',
+      );
+    if (!queueResponse.ok)
+      throw new Error(queueData.error ?? 'Não foi possível carregar a fila.');
+    setReservations(reservationsData.reservations);
+    setQueue(queueData.entries);
+    writeStaffCache('reservations', reservationsData.reservations);
+    writeStaffCache('waitlist', queueData.entries);
+    setOfflineSavedAt(null);
+  }, []);
+
+  const loadCachedData = useCallback(() => {
+    const cachedReservations = readStaffCache<Reservation[]>('reservations');
+    const cachedQueue = readStaffCache<QueueEntry[]>('waitlist');
+    const validReservations =
+      cachedReservations && cacheBelongsToToday(cachedReservations.savedAt)
+        ? cachedReservations
+        : null;
+    const validQueue =
+      cachedQueue && cacheBelongsToToday(cachedQueue.savedAt)
+        ? cachedQueue
+        : null;
+    if (!validReservations && !validQueue) return false;
+    setReservations(validReservations?.value ?? []);
+    setQueue(validQueue?.value ?? []);
+    setOfflineSavedAt(
+      [validReservations?.savedAt, validQueue?.savedAt]
+        .filter((value): value is string => Boolean(value))
+        .sort()
+        .at(-1) ?? new Date().toISOString(),
+    );
+    return true;
+  }, []);
 
   useEffect(() => {
     const firebase = getFirebaseClient();
@@ -79,35 +132,32 @@ export default function DashboardPage() {
       if (!user) return;
       setCurrentUser(user);
       try {
-        const token = await user.getIdToken();
-        const headers = { Authorization: `Bearer ${token}` };
-        const [reservationsResponse, queueResponse] = await Promise.all([
-          fetch('/api/reservas', { headers }),
-          fetch('/api/fila', { headers }),
-        ]);
-        const reservationsData = await reservationsResponse.json();
-        const queueData = await queueResponse.json();
-        if (!reservationsResponse.ok)
-          throw new Error(
-            reservationsData.error ?? 'Não foi possível carregar as reservas.',
-          );
-        if (!queueResponse.ok)
-          throw new Error(
-            queueData.error ?? 'Não foi possível carregar a fila.',
-          );
-        setReservations(reservationsData.reservations);
-        setQueue(queueData.entries);
+        await loadLiveData(user);
       } catch (caughtError) {
-        setError(
-          caughtError instanceof Error
-            ? caughtError.message
-            : 'Não foi possível carregar a visão geral.',
-        );
+        if (!loadCachedData())
+          setError(
+            caughtError instanceof Error
+              ? caughtError.message
+              : 'Não foi possível carregar a visão geral.',
+          );
       } finally {
         setLoading(false);
       }
     });
-  }, []);
+  }, [loadCachedData, loadLiveData]);
+
+  async function retryLiveData() {
+    if (!currentUser) return;
+    setLoading(true);
+    setError('');
+    try {
+      await loadLiveData(currentUser);
+    } catch {
+      setError('A conexão ainda não voltou. A última cópia foi mantida.');
+    } finally {
+      setLoading(false);
+    }
+  }
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
@@ -169,9 +219,11 @@ export default function DashboardPage() {
       const data = await response.json();
       if (!response.ok)
         throw new Error(data.error ?? 'Não foi possível atualizar a reserva.');
-      setReservations((current) =>
-        current.filter((item) => item.id !== reservation.id),
-      );
+      setReservations((current) => {
+        const next = current.filter((item) => item.id !== reservation.id);
+        writeStaffCache('reservations', next);
+        return next;
+      });
       setNoShowReservation(null);
       setSuccess(
         status === 'seated'
@@ -204,26 +256,37 @@ export default function DashboardPage() {
             ou enviar mensagens.
           </p>
         </div>
-        <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto sm:flex-wrap">
-          <Link
-            href="/painel/pendencias"
-            className={buttonVariants({
-              variant: 'outline',
-              className: 'h-11 border-black/15 bg-white px-3 sm:h-10 sm:px-4',
-            })}
-          >
-            <ClipboardCheck className="size-4" /> Ver pendências
-          </Link>
-          <Link
-            href="/painel/reservas/nova"
-            className={buttonVariants({
-              className: 'h-11 bg-black px-3 text-white hover:bg-black/85 sm:h-10 sm:px-4',
-            })}
-          >
-            <Plus className="size-4" /> Nova reserva
-          </Link>
+        <div className="w-full sm:w-auto">
+          {offlineSavedAt ? (
+            <span
+              className={buttonVariants({
+                className:
+                  'h-11 w-full cursor-not-allowed bg-black/45 px-3 text-white sm:h-10 sm:w-auto sm:px-4',
+              })}
+            >
+              <Plus className="size-4" /> Nova reserva
+            </span>
+          ) : (
+            <Link
+              href="/painel/reservas/nova"
+              className={buttonVariants({
+                className:
+                  'h-11 w-full bg-black px-3 text-white hover:bg-black/85 sm:h-10 sm:w-auto sm:px-4',
+              })}
+            >
+              <Plus className="size-4" /> Nova reserva
+            </Link>
+          )}
         </div>
       </div>
+
+      {offlineSavedAt ? (
+        <OfflineModeBanner
+          savedAt={offlineSavedAt}
+          retrying={loading}
+          onRetry={() => void retryLiveData()}
+        />
+      ) : null}
 
       {error ? (
         <p
@@ -274,7 +337,7 @@ export default function DashboardPage() {
                   return (
                     <>
                       <Button
-                        disabled={actionBusy}
+                        disabled={actionBusy || Boolean(offlineSavedAt)}
                         size="sm"
                         className="bg-black text-white hover:bg-black/85"
                         onClick={() =>
@@ -284,7 +347,7 @@ export default function DashboardPage() {
                         <CheckCircle2 /> Confirmar chegada
                       </Button>
                       <Button
-                        disabled={actionBusy}
+                        disabled={actionBusy || Boolean(offlineSavedAt)}
                         variant="outline"
                         size="sm"
                         className="border-red-200 text-red-700 hover:bg-red-50 hover:text-red-800"

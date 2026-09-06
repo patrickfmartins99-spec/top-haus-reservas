@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto';
 
-import { FieldValue } from 'firebase-admin/firestore';
+import { FieldValue, type DocumentData } from 'firebase-admin/firestore';
 import { after, NextResponse } from 'next/server';
 
 import {
@@ -30,6 +30,33 @@ function serializeTimestamp(value: unknown) {
   return null;
 }
 
+function serializeReservation(document: {
+  id: string;
+  data(): DocumentData | undefined;
+}) {
+  const data = document.data() ?? {};
+  return {
+    id: document.id,
+    customerName: String(data.customerName ?? ''),
+    whatsapp: String(data.whatsapp ?? ''),
+    partySize: Number(data.partySize ?? 0),
+    service: String(data.service ?? ''),
+    serviceDate: String(data.serviceDate ?? ''),
+    arrivalTime: String(data.arrivalTime ?? ''),
+    notes: String(data.notes ?? ''),
+    tableLabel: String(data.tableLabel ?? ''),
+    status: String(data.status ?? 'confirmed'),
+    source: String(data.source ?? 'customer_web'),
+    cancellationReason: String(data.cancellationReason ?? ''),
+    cancellationReasonLabel: String(data.cancellationReasonLabel ?? ''),
+    cancellationNote: String(data.cancellationNote ?? ''),
+    outcomeReason: String(data.outcomeReason ?? ''),
+    outcomeReasonLabel: String(data.outcomeReasonLabel ?? ''),
+    outcomeNote: String(data.outcomeNote ?? ''),
+    createdAt: serializeTimestamp(data.createdAt),
+  };
+}
+
 export async function GET(request: Request) {
   const context = await requireStaff(request);
   if (!context)
@@ -45,36 +72,36 @@ export async function GET(request: Request) {
       { status: 503 },
     );
 
-  const snapshot = await database
-    .collection('reservations')
-    .orderBy('createdAt', 'desc')
-    .limit(300)
-    .get();
-  const reservations = snapshot.docs
-    .filter((document) => !document.data().deletedAt)
-    .map((document) => {
-      const data = document.data();
-      return {
-        id: document.id,
-        customerName: String(data.customerName ?? ''),
-        whatsapp: String(data.whatsapp ?? ''),
-        partySize: Number(data.partySize ?? 0),
-        service: String(data.service ?? ''),
-        serviceDate: String(data.serviceDate ?? ''),
-        arrivalTime: String(data.arrivalTime ?? ''),
-        notes: String(data.notes ?? ''),
-        tableLabel: String(data.tableLabel ?? ''),
-        status: String(data.status ?? 'confirmed'),
-        source: String(data.source ?? 'customer_web'),
-        cancellationReason: String(data.cancellationReason ?? ''),
-        cancellationReasonLabel: String(data.cancellationReasonLabel ?? ''),
-        cancellationNote: String(data.cancellationNote ?? ''),
-        outcomeReason: String(data.outcomeReason ?? ''),
-        outcomeReasonLabel: String(data.outcomeReasonLabel ?? ''),
-        outcomeNote: String(data.outcomeNote ?? ''),
-        createdAt: serializeTimestamp(data.createdAt),
-      };
-    });
+  const url = new URL(request.url);
+  const serviceDate = url.searchParams.get('data') ?? '';
+  const reservationId = url.searchParams.get('id') ?? '';
+  let reservations;
+
+  if (/^[A-Za-z0-9_-]{1,160}$/.test(reservationId)) {
+    const document = await database
+      .collection('reservations')
+      .doc(reservationId)
+      .get();
+    reservations =
+      document.exists && !document.data()?.deletedAt
+        ? [serializeReservation(document)]
+        : [];
+  } else {
+    const snapshot = /^\d{4}-\d{2}-\d{2}$/.test(serviceDate)
+      ? await database
+          .collection('reservations')
+          .where('serviceDate', '==', serviceDate)
+          .limit(200)
+          .get()
+      : await database
+          .collection('reservations')
+          .orderBy('createdAt', 'desc')
+          .limit(300)
+          .get();
+    reservations = snapshot.docs
+      .filter((document) => !document.data().deletedAt)
+      .map(serializeReservation);
+  }
 
   return NextResponse.json({ reservations });
 }

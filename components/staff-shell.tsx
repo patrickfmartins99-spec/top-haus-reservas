@@ -18,7 +18,6 @@ import {
   CalendarDays,
   CalendarRange,
   ChartNoAxesCombined,
-  ClipboardCheck,
   History,
   LayoutDashboard,
   ListOrdered,
@@ -45,10 +44,15 @@ import {
   PopoverTrigger,
 } from '@/components/ui/popover';
 import { getFirebaseClient } from '@/lib/firebase/client';
+import { fetchWithTimeout } from '@/lib/client/fetch-with-timeout';
+import {
+  clearStaffCache,
+  readStaffCache,
+  writeStaffCache,
+} from '@/lib/offline/staff-cache';
 
 const navigation = [
   { icon: LayoutDashboard, label: 'Painel geral', href: '/painel' },
-  { icon: ClipboardCheck, label: 'Pendências', href: '/painel/pendencias' },
   { icon: CalendarDays, label: 'Reservas', href: '/painel/reservas' },
   { icon: ListOrdered, label: 'Fila de espera', href: '/painel/fila' },
   {
@@ -65,7 +69,6 @@ const navigation = [
 
 const mobilePrimaryNavigation = [
   { icon: LayoutDashboard, label: 'Hoje', href: '/painel' },
-  { icon: ClipboardCheck, label: 'Pendências', href: '/painel/pendencias' },
   { icon: CalendarDays, label: 'Reservas', href: '/painel/reservas' },
   { icon: ListOrdered, label: 'Fila', href: '/painel/fila' },
 ];
@@ -81,16 +84,26 @@ export function StaffShell({ children }: { children: ReactNode }) {
   const [checkingSession, setCheckingSession] = useState(true);
   const [profile, setProfile] = useState<StaffProfile | null>(null);
   const [sessionError, setSessionError] = useState('');
+  const [offlineSession, setOfflineSession] = useState(false);
   async function refreshProfile() {
     const user = getFirebaseClient()?.auth.currentUser;
     if (!user) return;
-    const response = await fetch('/api/conta', {
+    const response = await fetchWithTimeout('/api/conta', {
       headers: { Authorization: 'Bearer ' + (await user.getIdToken()) },
     });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error);
     setProfile(data.profile);
     setDisplayName(data.profile.displayName);
+    setOfflineSession(false);
+    writeStaffCache('profile', {
+      ...data.profile,
+      photo:
+        typeof data.profile.photo === 'string' &&
+        data.profile.photo.length < 250_000
+          ? data.profile.photo
+          : '',
+    });
   }
   const [displayName, setDisplayName] = useState('Colaborador');
   const [loggingOut, setLoggingOut] = useState(false);
@@ -100,10 +113,10 @@ export function StaffShell({ children }: { children: ReactNode }) {
       title: string;
       description: string;
       href: string;
-      workflowStatus?: string;
-      workflowActorName?: string;
+      createdAt: string;
     }>
   >([]);
+  const [seenNotificationIds, setSeenNotificationIds] = useState<string[]>([]);
 
   useEffect(() => {
     const firebase = getFirebaseClient();
@@ -120,74 +133,87 @@ export function StaffShell({ children }: { children: ReactNode }) {
       try {
         await refreshProfile();
       } catch {
-        setSessionError(
-          'Não foi possível verificar seu acesso. Atualize a página ou entre novamente.',
-        );
+        const cached = readStaffCache<StaffProfile>('profile');
+        if (cached?.value.uid === user.uid) {
+          setProfile(cached.value);
+          setDisplayName(cached.value.displayName);
+          setOfflineSession(true);
+          setSessionError('');
+        } else {
+          setSessionError(
+            'Não foi possível verificar seu acesso. Atualize a página ou entre novamente.',
+          );
+        }
       }
       setCheckingSession(false);
     });
   }, [router]);
 
-  async function loadNotifications() {
-    const firebase = getFirebaseClient();
-    const user = firebase?.auth.currentUser;
-    if (!user) return;
-    try {
-      const token = await user.getIdToken();
-      const response = await fetch('/api/pendencias', {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const data = await response.json();
-      if (response.ok) setNotifications(data.items);
-    } catch {
-      // A central continua utilizável mesmo se a atualização silenciosa falhar.
-    }
-  }
-
   useEffect(() => {
     if (checkingSession) return;
     const firebase = getFirebaseClient();
-    const initial = window.setTimeout(() => {
-      void loadNotifications();
+    const user = firebase?.auth.currentUser;
+    if (!firebase || !user) return;
+    const seenKey = `tophaus.staff.notifications.seen.${user.uid}`;
+    const loadSeen = window.setTimeout(() => {
+      try {
+        const saved = JSON.parse(window.localStorage.getItem(seenKey) ?? '[]');
+        setSeenNotificationIds(Array.isArray(saved) ? saved : []);
+      } catch {
+        setSeenNotificationIds([]);
+      }
     }, 0);
-    const interval = window.setInterval(() => {
-      void loadNotifications();
-    }, 300000);
-    const refresh = () => {
-      void loadNotifications();
-    };
-    let receivedInitialSnapshot = false;
     const stopRealtime = firebase
       ? onSnapshot(
           query(
             collection(firebase.db, 'staffNotifications'),
             orderBy('createdAt', 'desc'),
-            limit(1),
+            limit(20),
           ),
           (snapshot) => {
-            if (
-              receivedInitialSnapshot &&
-              snapshot.docChanges().some((change) => change.type === 'added')
-            ) {
-              refresh();
-            }
-            receivedInitialSnapshot = true;
+            setNotifications(
+              snapshot.docs.map((document) => {
+                const data = document.data();
+                return {
+                  id: document.id,
+                  title: String(data.title ?? 'Atualização no atendimento'),
+                  description: String(
+                    data.description ?? 'Abra para conferir os detalhes.',
+                  ),
+                  href: String(data.href ?? '/painel'),
+                  createdAt:
+                    typeof data.createdAt?.toDate === 'function'
+                      ? data.createdAt.toDate().toISOString()
+                      : '',
+                };
+              }),
+            );
           },
           () => {
-            // O intervalo e o foco continuam como contingência se a conexão cair.
+            // As notificações móveis continuam funcionando se o sino ficar offline.
           },
         )
       : () => {};
-    window.addEventListener('focus', refresh);
-    navigator.serviceWorker?.addEventListener('message', refresh);
     return () => {
-      window.clearTimeout(initial);
-      window.clearInterval(interval);
-      window.removeEventListener('focus', refresh);
-      navigator.serviceWorker?.removeEventListener('message', refresh);
+      window.clearTimeout(loadSeen);
       stopRealtime();
     };
   }, [checkingSession]);
+
+  function markNotificationsRead() {
+    const user = getFirebaseClient()?.auth.currentUser;
+    if (!user) return;
+    const ids = notifications.map((item) => item.id);
+    setSeenNotificationIds(ids);
+    try {
+      window.localStorage.setItem(
+        `tophaus.staff.notifications.seen.${user.uid}`,
+        JSON.stringify(ids),
+      );
+    } catch {
+      // O sino continua utilizável quando o armazenamento local está bloqueado.
+    }
+  }
 
   async function handleLogout() {
     const firebase = getFirebaseClient();
@@ -201,6 +227,7 @@ export function StaffShell({ children }: { children: ReactNode }) {
     } catch {
       /* Sign-out must remain available if the push service is offline. */
     }
+    clearStaffCache('profile');
     await signOut(firebase.auth);
     router.replace('/entrar');
   }
@@ -241,12 +268,7 @@ export function StaffShell({ children }: { children: ReactNode }) {
   const visibleNavigation = navigation.filter(
     (item) =>
       profile.role === 'admin' ||
-      [
-        '/painel',
-        '/painel/pendencias',
-        '/painel/reservas',
-        '/painel/fila',
-      ].includes(item.href),
+      ['/painel', '/painel/reservas', '/painel/fila'].includes(item.href),
   );
   const initials =
     displayName
@@ -266,6 +288,9 @@ export function StaffShell({ children }: { children: ReactNode }) {
   const adminMoreActive = adminMoreNavigation.some((item) =>
     isActive(pathname, item.href),
   );
+  const unreadNotifications = notifications.filter(
+    (item) => !seenNotificationIds.includes(item.id),
+  ).length;
 
   return (
     <StaffSession.Provider value={{ profile, refresh: refreshProfile }}>
@@ -341,14 +366,14 @@ export function StaffShell({ children }: { children: ReactNode }) {
               <div className="flex items-center gap-2">
                 <Popover>
                   <PopoverTrigger
-                    onClick={() => void loadNotifications()}
+                    onClick={markNotificationsRead}
                     className={`${buttonVariants({ variant: 'outline', size: 'icon' })} relative`}
-                    aria-label={`Notificações: ${notifications.length}`}
+                    aria-label={`Notificações: ${unreadNotifications} não lidas`}
                   >
                     <Bell className="size-4" />
-                    {notifications.length ? (
+                    {unreadNotifications ? (
                       <span className="absolute -right-1 -top-1 grid min-h-4 min-w-4 place-items-center rounded-full bg-haus-terracotta px-1 text-[9px] font-bold text-white">
-                        {notifications.length > 9 ? '9+' : notifications.length}
+                        {unreadNotifications > 9 ? '9+' : unreadNotifications}
                       </span>
                     ) : null}
                   </PopoverTrigger>
@@ -383,21 +408,13 @@ export function StaffShell({ children }: { children: ReactNode }) {
                           <p className="mt-1 text-xs leading-5 text-black/65">
                             {item.description}
                           </p>
-                          {item.workflowStatus === 'claimed' ? (
-                            <p className="mt-2 text-xs font-bold text-[#7b571d]">
-                              Assumida por {item.workflowActorName}
+                          {item.createdAt ? (
+                            <p className="mt-2 text-[11px] font-medium text-black/50">
+                              {new Date(item.createdAt).toLocaleString('pt-BR')}
                             </p>
                           ) : null}
                         </Link>
                       ))}
-                      {notifications.length ? (
-                        <Link
-                          href="/painel/pendencias"
-                          className="mt-2 block rounded-lg bg-black px-3 py-2.5 text-center text-sm font-bold text-white"
-                        >
-                          Abrir central de pendências
-                        </Link>
-                      ) : null}
                     </div>
                   </PopoverContent>
                 </Popover>
@@ -428,6 +445,12 @@ export function StaffShell({ children }: { children: ReactNode }) {
               </div>
             </header>
 
+            {offlineSession ? (
+              <div className="border-b border-amber-700/20 bg-amber-50 px-4 py-2 text-center text-sm font-semibold text-amber-950 sm:px-6">
+                Modo de contingência: acesso validado pela última sessão deste
+                aparelho. Os dados disponíveis serão somente para consulta.
+              </div>
+            ) : null}
             {children}
           </section>
         </div>
@@ -436,10 +459,11 @@ export function StaffShell({ children }: { children: ReactNode }) {
           className="fixed inset-x-0 bottom-0 z-40 border-t border-black/10 bg-white/95 pb-[max(0.4rem,env(safe-area-inset-bottom))] shadow-[0_-8px_30px_rgba(0,0,0,0.10)] backdrop-blur lg:hidden"
           aria-label="Navegação principal no celular"
         >
-          <div className="mx-auto grid max-w-lg grid-cols-5 gap-1 px-1.5 pt-1.5">
+          <div
+            className={`mx-auto grid max-w-lg gap-1 px-1.5 pt-1.5 ${profile.role === 'admin' ? 'grid-cols-4' : 'grid-cols-3'}`}
+          >
             {mobilePrimaryNavigation.map(({ icon: Icon, label, href }) => {
               const active = isActive(pathname, href);
-              const showBadge = href === '/painel/pendencias' && notifications.length > 0;
               return (
                 <Link
                   key={href}
@@ -449,13 +473,10 @@ export function StaffShell({ children }: { children: ReactNode }) {
                 >
                   <span className="relative">
                     <Icon className="size-5" strokeWidth={active ? 2.6 : 2} />
-                    {showBadge ? (
-                      <span className="absolute -right-2 -top-1 grid min-h-4 min-w-4 place-items-center rounded-full bg-haus-terracotta px-1 text-[8px] font-extrabold text-white">
-                        {notifications.length > 9 ? '9+' : notifications.length}
-                      </span>
-                    ) : null}
                   </span>
-                  <span className="whitespace-nowrap leading-none">{label}</span>
+                  <span className="whitespace-nowrap leading-none">
+                    {label}
+                  </span>
                 </Link>
               );
             })}
@@ -466,7 +487,10 @@ export function StaffShell({ children }: { children: ReactNode }) {
                   aria-label="Abrir mais opções"
                   className={`flex min-h-14 w-full flex-col items-center justify-center gap-1 rounded-xl px-0.5 py-1.5 text-[9px] font-bold transition active:scale-[0.97] min-[360px]:px-1 min-[360px]:text-[10px] ${adminMoreActive ? 'bg-[#f1e5dc] text-haus-terracotta' : 'text-black/60'}`}
                 >
-                  <Menu className="size-5" strokeWidth={adminMoreActive ? 2.6 : 2} />
+                  <Menu
+                    className="size-5"
+                    strokeWidth={adminMoreActive ? 2.6 : 2}
+                  />
                   Mais
                 </PopoverTrigger>
                 <PopoverContent
@@ -476,28 +500,28 @@ export function StaffShell({ children }: { children: ReactNode }) {
                   className="w-[min(21rem,calc(100vw-1rem))] p-2"
                 >
                   <PopoverHeader className="px-2 pb-2 pt-1">
-                    <PopoverTitle className="font-bold">Mais opções</PopoverTitle>
+                    <PopoverTitle className="font-bold">
+                      Mais opções
+                    </PopoverTitle>
                     <p className="text-xs text-black/60">
                       Administração e configurações da conta.
                     </p>
                   </PopoverHeader>
                   <div className="grid grid-cols-2 gap-1">
-                    {adminMoreNavigation.map(
-                      ({ icon: Icon, label, href }) => {
-                        const active = isActive(pathname, href);
-                        return (
-                          <Link
-                            key={href}
-                            href={href}
-                            aria-current={active ? 'page' : undefined}
-                            className={`flex min-h-12 items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold ${active ? 'bg-[#f1e5dc] text-haus-terracotta' : 'text-black/75 hover:bg-black/5'}`}
-                          >
-                            <Icon className="size-4 shrink-0" />
-                            {label}
-                          </Link>
-                        );
-                      },
-                    )}
+                    {adminMoreNavigation.map(({ icon: Icon, label, href }) => {
+                      const active = isActive(pathname, href);
+                      return (
+                        <Link
+                          key={href}
+                          href={href}
+                          aria-current={active ? 'page' : undefined}
+                          className={`flex min-h-12 items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold ${active ? 'bg-[#f1e5dc] text-haus-terracotta' : 'text-black/75 hover:bg-black/5'}`}
+                        >
+                          <Icon className="size-4 shrink-0" />
+                          {label}
+                        </Link>
+                      );
+                    })}
                   </div>
                   <button
                     onClick={handleLogout}

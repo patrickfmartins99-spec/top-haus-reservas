@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 
 import { ReasonDialog } from '@/components/reason-dialog';
+import { OfflineModeBanner } from '@/components/offline-mode-banner';
 import { ReservationCards } from '@/components/reservation-cards';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -40,6 +41,13 @@ import {
 } from '@/lib/domain/service-outcomes';
 import { getFirebaseClient } from '@/lib/firebase/client';
 import type { SpecialDateException } from '@/lib/domain/special-dates';
+import { fetchWithTimeout } from '@/lib/client/fetch-with-timeout';
+import {
+  brazilDate,
+  cacheBelongsToToday,
+  readStaffCache,
+  writeStaffCache,
+} from '@/lib/offline/staff-cache';
 
 type Reservation = {
   id: string;
@@ -66,11 +74,16 @@ const times: Record<string, string[]> = {
   rodizio: ['18:30', '18:45', '19:00'],
 };
 
-async function loadReservations(user: User) {
+async function loadReservations(user: User, serviceDate = '') {
   const token = await user.getIdToken();
-  const response = await fetch('/api/reservas', {
-    headers: { Authorization: `Bearer ${token}` },
-  });
+  const parameters = new URLSearchParams();
+  if (serviceDate) parameters.set('data', serviceDate);
+  const response = await fetchWithTimeout(
+    `/api/reservas${parameters.size ? `?${parameters}` : ''}`,
+    {
+      headers: { Authorization: `Bearer ${token}` },
+    },
+  );
   const data = await response.json();
   if (!response.ok)
     throw new Error(data.error ?? 'Não foi possível carregar as reservas.');
@@ -85,6 +98,7 @@ export default function ReservationsPage() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [offlineSavedAt, setOfflineSavedAt] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [search, setSearch] = useState(searchParams.get('busca') ?? '');
@@ -128,9 +142,21 @@ export default function ReservationsPage() {
   const [editingReservation, setEditingReservation] =
     useState<Reservation | null>(null);
 
-  const refresh = useCallback(async (user: User) => {
-    setReservations(await loadReservations(user));
-  }, []);
+  const refresh = useCallback(
+    async (user: User) => {
+      const items = await loadReservations(user, dateFilter);
+      setReservations(items);
+      setOfflineSavedAt(null);
+      const today = brazilDate();
+      if (!dateFilter || dateFilter === today) {
+        writeStaffCache(
+          'reservations',
+          items.filter((reservation) => reservation.serviceDate === today),
+        );
+      }
+    },
+    [dateFilter],
+  );
 
   useEffect(() => {
     const firebase = getFirebaseClient();
@@ -153,16 +179,37 @@ export default function ReservationsPage() {
         ]);
         setExceptions(publicSettings.exceptions ?? []);
       } catch (caughtError) {
-        setError(
-          caughtError instanceof Error
-            ? caughtError.message
-            : 'Não foi possível carregar as reservas.',
-        );
+        const cached = readStaffCache<Reservation[]>('reservations');
+        if (cached && cacheBelongsToToday(cached.savedAt)) {
+          setReservations(cached.value);
+          setOfflineSavedAt(cached.savedAt);
+          setDateFilter(brazilDate());
+          setError('');
+        } else {
+          setError(
+            caughtError instanceof Error
+              ? caughtError.message
+              : 'Não foi possível carregar as reservas.',
+          );
+        }
       } finally {
         setLoading(false);
       }
     });
   }, [refresh]);
+
+  async function retryLiveData() {
+    if (!currentUser) return;
+    setLoading(true);
+    setError('');
+    try {
+      await refresh(currentUser);
+    } catch {
+      setError('A conexão ainda não voltou. A última cópia foi mantida.');
+    } finally {
+      setLoading(false);
+    }
+  }
 
   const filteredReservations = useMemo(() => {
     const term = search.trim().toLowerCase();
@@ -284,16 +331,35 @@ export default function ReservationsPage() {
             Consulte e acompanhe todas as reservas registradas no Firebase.
           </p>
         </div>
-        <Link
-          href="/painel/reservas/nova"
-          className={buttonVariants({
-            className:
-              'h-11 w-full bg-black text-white hover:bg-black/85 sm:w-auto',
-          })}
-        >
-          <Plus /> Nova reserva
-        </Link>
+        {offlineSavedAt ? (
+          <span
+            className={buttonVariants({
+              className:
+                'h-11 w-full cursor-not-allowed bg-black/45 text-white sm:w-auto',
+            })}
+          >
+            <Plus /> Nova reserva
+          </span>
+        ) : (
+          <Link
+            href="/painel/reservas/nova"
+            className={buttonVariants({
+              className:
+                'h-11 w-full bg-black text-white hover:bg-black/85 sm:w-auto',
+            })}
+          >
+            <Plus /> Nova reserva
+          </Link>
+        )}
       </div>
+
+      {offlineSavedAt ? (
+        <OfflineModeBanner
+          savedAt={offlineSavedAt}
+          retrying={loading}
+          onRetry={() => void retryLiveData()}
+        />
+      ) : null}
 
       {createdId ? (
         <output className="block rounded-xl bg-black px-4 py-3 text-sm font-semibold text-white">
@@ -382,6 +448,7 @@ export default function ReservationsPage() {
                 aria-label="Filtrar por data"
                 type="date"
                 value={dateFilter}
+                disabled={Boolean(offlineSavedAt)}
                 onChange={(event) => setDateFilter(event.target.value)}
                 className="pl-9"
               />
@@ -418,6 +485,7 @@ export default function ReservationsPage() {
             <Button
               variant="outline"
               size="sm"
+              disabled={Boolean(offlineSavedAt)}
               onClick={() => setDateFilter('')}
             >
               Todas as datas
@@ -446,6 +514,7 @@ export default function ReservationsPage() {
                     <Button
                       variant="outline"
                       size="sm"
+                      disabled={Boolean(offlineSavedAt)}
                       onClick={() => startEditing(reservation)}
                     >
                       <Pencil /> Editar
@@ -456,6 +525,7 @@ export default function ReservationsPage() {
                       <Button
                         variant="outline"
                         size="sm"
+                        disabled={Boolean(offlineSavedAt)}
                         className="text-red-700"
                         onClick={() => {
                           setError('');

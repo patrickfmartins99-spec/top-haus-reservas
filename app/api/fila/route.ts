@@ -36,11 +36,18 @@ export async function GET(request: Request) {
       { status: 503 },
     );
 
-  const snapshot = await database
-    .collection('waitlist')
-    .orderBy('enteredAt', 'asc')
-    .limit(200)
-    .get();
+  const activeOnly = new URL(request.url).searchParams.get('ativas') === '1';
+  const snapshot = activeOnly
+    ? await database
+        .collection('waitlist')
+        .where('status', 'in', ['waiting', 'called'])
+        .limit(100)
+        .get()
+    : await database
+        .collection('waitlist')
+        .orderBy('enteredAt', 'asc')
+        .limit(200)
+        .get();
   const entries = snapshot.docs.map((document) => {
     const data = document.data();
     return {
@@ -60,6 +67,9 @@ export async function GET(request: Request) {
       exitNote: String(data.exitNote ?? ''),
     };
   });
+  entries.sort((first, second) =>
+    String(first.enteredAt ?? '').localeCompare(String(second.enteredAt ?? '')),
+  );
 
   return NextResponse.json({ entries });
 }

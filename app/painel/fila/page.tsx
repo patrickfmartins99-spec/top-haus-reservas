@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 
 import { ReasonDialog } from '@/components/reason-dialog';
+import { OfflineModeBanner } from '@/components/offline-mode-banner';
 import { Badge } from '@/components/ui/badge';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -40,6 +41,12 @@ import {
   WAITLIST_NO_SHOW_REASONS,
 } from '@/lib/domain/service-outcomes';
 import { getFirebaseClient } from '@/lib/firebase/client';
+import { fetchWithTimeout } from '@/lib/client/fetch-with-timeout';
+import {
+  cacheBelongsToToday,
+  readStaffCache,
+  writeStaffCache,
+} from '@/lib/offline/staff-cache';
 import { buildWhatsAppUrl, customerMessage } from '@/lib/whatsapp';
 
 type QueueStatus = 'waiting' | 'called' | 'seated' | 'removed' | 'no_show';
@@ -75,7 +82,7 @@ async function staffRequest(user: User, url: string, init?: RequestInit) {
   const headers = new Headers(init?.headers);
   headers.set('Content-Type', 'application/json');
   headers.set('Authorization', `Bearer ${token}`);
-  return fetch(url, {
+  return fetchWithTimeout(url, {
     ...init,
     headers,
   });
@@ -86,6 +93,7 @@ export default function WaitlistPage() {
   const [queue, setQueue] = useState<QueueEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [offlineSavedAt, setOfflineSavedAt] = useState<string | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingEntry, setEditingEntry] = useState<QueueEntry | null>(null);
   const [error, setError] = useState('');
@@ -100,11 +108,13 @@ export default function WaitlistPage() {
   } | null>(null);
 
   const loadQueue = useCallback(async (user: User) => {
-    const response = await staffRequest(user, '/api/fila');
+    const response = await staffRequest(user, '/api/fila?ativas=1');
     const data = await response.json();
     if (!response.ok)
       throw new Error(data.error ?? 'Não foi possível carregar a fila.');
     setQueue(data.entries);
+    setOfflineSavedAt(null);
+    writeStaffCache('waitlist', data.entries);
   }, []);
 
   useEffect(() => {
@@ -122,16 +132,36 @@ export default function WaitlistPage() {
       try {
         await loadQueue(user);
       } catch (caughtError) {
-        setError(
-          caughtError instanceof Error
-            ? caughtError.message
-            : 'Não foi possível carregar a fila.',
-        );
+        const cached = readStaffCache<QueueEntry[]>('waitlist');
+        if (cached && cacheBelongsToToday(cached.savedAt)) {
+          setQueue(cached.value);
+          setOfflineSavedAt(cached.savedAt);
+          setError('');
+        } else {
+          setError(
+            caughtError instanceof Error
+              ? caughtError.message
+              : 'Não foi possível carregar a fila.',
+          );
+        }
       } finally {
         setLoading(false);
       }
     });
   }, [loadQueue]);
+
+  async function retryLiveData() {
+    if (!currentUser) return;
+    setLoading(true);
+    setError('');
+    try {
+      await loadQueue(currentUser);
+    } catch {
+      setError('A conexão ainda não voltou. A última cópia foi mantida.');
+    } finally {
+      setLoading(false);
+    }
+  }
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
@@ -280,11 +310,20 @@ export default function WaitlistPage() {
         </div>
         <Button
           className="h-11 w-full bg-black text-white hover:bg-black/85 sm:w-auto"
+          disabled={Boolean(offlineSavedAt)}
           onClick={openNewEntry}
         >
           <Plus /> Adicionar à fila
         </Button>
       </div>
+
+      {offlineSavedAt ? (
+        <OfflineModeBanner
+          savedAt={offlineSavedAt}
+          retrying={loading}
+          onRetry={() => void retryLiveData()}
+        />
+      ) : null}
 
       <div className="rounded-xl border border-haus-gold/45 bg-[#f4e7d7] px-4 py-3 text-sm text-black/75">
         <strong>WhatsApp assistido:</strong> o sistema abre a conversa com a
@@ -402,7 +441,7 @@ export default function WaitlistPage() {
                 </div>
                 <div className="flex w-full flex-wrap gap-2 sm:w-auto [&>*]:min-w-[7.5rem] [&>*]:flex-1 sm:[&>*]:flex-none">
                   <Button
-                    disabled={saving}
+                    disabled={saving || Boolean(offlineSavedAt)}
                     variant="outline"
                     onClick={() => openEditEntry(entry)}
                   >
@@ -410,7 +449,7 @@ export default function WaitlistPage() {
                   </Button>
                   {entry.status === 'waiting' ? (
                     <Button
-                      disabled={saving}
+                      disabled={saving || Boolean(offlineSavedAt)}
                       onClick={() => updateStatus(entry, 'called')}
                       className="bg-haus-terracotta text-white hover:bg-haus-terracotta/90"
                     >
@@ -433,7 +472,7 @@ export default function WaitlistPage() {
                   ) : null}
                   {entry.status === 'called' ? (
                     <Button
-                      disabled={saving}
+                      disabled={saving || Boolean(offlineSavedAt)}
                       onClick={() => updateStatus(entry, 'seated')}
                       className="bg-black text-white hover:bg-black/85"
                     >
@@ -441,7 +480,7 @@ export default function WaitlistPage() {
                     </Button>
                   ) : null}
                   <Button
-                    disabled={saving}
+                    disabled={saving || Boolean(offlineSavedAt)}
                     variant="outline"
                     onClick={() => setExitAction({ entry, status: 'removed' })}
                   >
@@ -449,7 +488,7 @@ export default function WaitlistPage() {
                   </Button>
                   {entry.status === 'called' ? (
                     <Button
-                      disabled={saving}
+                      disabled={saving || Boolean(offlineSavedAt)}
                       variant="outline"
                       className="border-red-200 text-red-700 hover:bg-red-50 hover:text-red-800"
                       onClick={() =>
@@ -540,7 +579,7 @@ export default function WaitlistPage() {
               </Button>
               <Button
                 type="submit"
-                disabled={saving}
+                disabled={saving || Boolean(offlineSavedAt)}
                 className="bg-black text-white hover:bg-black/85"
               >
                 {saving ? (

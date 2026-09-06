@@ -64,6 +64,7 @@ let profile = {
   photo: '',
 };
 let editedUser = false;
+let firebaseUnavailable = false;
 const teamUser = {
   uid: 'another',
   username: 'colaborador',
@@ -131,9 +132,9 @@ const message = {
 const jwt = `${Buffer.from('{}').toString('base64url')}.${Buffer.from(JSON.stringify({ sub: 'staff-test', user_id: 'staff-test', email: 'staff@example.com', iat: Math.floor(Date.now() / 1000), exp: Math.floor(Date.now() / 1000) + 3600, auth_time: Math.floor(Date.now() / 1000), firebase: { sign_in_provider: 'password' } })).toString('base64url')}.test`;
 page.on('request', async (request) => {
   const url = new URL(request.url());
-  const reply = (body) =>
+  const reply = (body, status = 200) =>
     request.respond({
-      status: 200,
+      status,
       contentType: 'application/json',
       headers: {
         'Access-Control-Allow-Origin': '*',
@@ -181,6 +182,12 @@ page.on('request', async (request) => {
   if (url.hostname !== 'localhost') return request.abort();
   if (!url.pathname.startsWith('/api/')) return request.continue();
   const body = request.postData() ? JSON.parse(request.postData()) : {};
+  if (
+    firebaseUnavailable &&
+    request.method() === 'GET' &&
+    ['/api/conta', '/api/reservas', '/api/fila'].includes(url.pathname)
+  )
+    return reply({ error: 'Firebase temporariamente indisponível.' }, 503);
   if (url.pathname === '/api/conta') {
     if (request.method() === 'PATCH') {
       profile = { ...profile, ...body };
@@ -328,6 +335,20 @@ try {
   await page.type('#password', 'somente-teste-local');
   await click('Entrar no painel');
   await waitText('Reservas de hoje');
+  await waitText('Mariana Teste');
+  await waitText('Cliente da Fila');
+  firebaseUnavailable = true;
+  await page.reload({ waitUntil: 'networkidle0' });
+  await waitText('Modo de contingência');
+  await waitText('Mariana Teste');
+  await waitText('Cliente da Fila');
+  assert.equal(await page.$('a[href="/painel/reservas/nova"]'), null);
+  firebaseUnavailable = false;
+  await page.reload({ waitUntil: 'networkidle0' });
+  await waitText('Reservas de hoje');
+  console.log(
+    'PASS: reservas e fila permanecem visíveis em modo de contingência.',
+  );
   await page.click('button[aria-label^="Notificações:"]');
   await waitText('Avisos no celular da equipe');
   await page.keyboard.press('Escape');
@@ -455,10 +476,10 @@ try {
   assert.equal(await page.$('#account-role'), null);
   assert.equal(await page.$('#capacity'), null);
   const menu = await page.$$eval(
-    'nav[aria-label="Navegação do painel"] a',
+    'nav[aria-label="Navegação principal no celular"] a',
     (links) => links.map((a) => a.textContent.trim()),
   );
-  assert.deepEqual(menu, ['Painel geral', 'Reservas', 'Fila de espera']);
+  assert.deepEqual(menu, ['Hoje', 'Reservas', 'Fila', 'Conta']);
   assert.equal(
     await page.evaluate(
       () => document.documentElement.scrollWidth > window.innerWidth,
