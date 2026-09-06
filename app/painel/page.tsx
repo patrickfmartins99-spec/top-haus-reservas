@@ -36,7 +36,7 @@ import {
 
 type Reservation = {
   id: string;
-  reservationCode: string;
+  reservationCode?: string;
   customerName: string;
   partySize: number;
   service: string;
