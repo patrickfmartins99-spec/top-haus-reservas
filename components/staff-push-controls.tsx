@@ -39,6 +39,47 @@ async function registration() {
     ),
   ]);
 }
+async function subscribeCurrentDevice() {
+  const reg = await registration();
+  let subscription = await reg.pushManager.getSubscription();
+
+  if (!subscription) {
+    const { publicKey } = await pushRequest('config');
+    const base64 = publicKey.replace(/-/g, '+').replace(/_/g, '/');
+    const key = Uint8Array.from(
+      atob(base64 + '='.repeat((4 - (base64.length % 4)) % 4)),
+      (char) => char.charCodeAt(0),
+    );
+    subscription = await reg.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: key,
+    });
+  }
+
+  await pushRequest('subscribe', subscription);
+  return subscription;
+}
+
+export function StaffPushBootstrap() {
+  useEffect(() => {
+    if (
+      !('serviceWorker' in navigator) ||
+      !('PushManager' in window) ||
+      !('Notification' in window) ||
+      Notification.permission !== 'granted'
+    )
+      return;
+
+    // Keep a previously-authorized device registered even when the bell is
+    // never opened. This runs once per browser session, not on a timer.
+    void subscribeCurrentDevice().catch(() => {
+      // The visible controls still let the collaborator retry and run a test.
+    });
+  }, []);
+
+  return null;
+}
+
 export async function removeStaffPush() {
   if (!('serviceWorker' in navigator)) return;
   const reg = await navigator.serviceWorker.getRegistration('/');
@@ -103,20 +144,7 @@ export function StaffPushControls() {
         );
         return;
       }
-      const { publicKey } = await pushRequest('config');
-      const reg = await registration();
-      const base64 = publicKey.replace(/-/g, '+').replace(/_/g, '/');
-      const key = Uint8Array.from(
-        atob(base64 + '='.repeat((4 - (base64.length % 4)) % 4)),
-        (char) => char.charCodeAt(0),
-      );
-      const sub =
-        (await reg.pushManager.getSubscription()) ??
-        (await reg.pushManager.subscribe({
-          userVisibleOnly: true,
-          applicationServerKey: key,
-        }));
-      await pushRequest('subscribe', sub);
+      await subscribeCurrentDevice();
       setSubscribed(true);
       setMessage(
         'Aparelho inscrito. Use “Enviar teste” para conferir o recebimento.',
