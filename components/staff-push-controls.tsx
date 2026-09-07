@@ -70,11 +70,19 @@ export function StaffPushBootstrap() {
     )
       return;
 
+    const uid = getFirebaseClient()?.auth.currentUser?.uid;
+    const refreshKey = uid ? `tophaus.staff.push.ready.${uid}` : '';
+    if (refreshKey && window.sessionStorage.getItem(refreshKey) === '1') return;
+
     // Keep a previously-authorized device registered even when the bell is
     // never opened. This runs once per browser session, not on a timer.
-    void subscribeCurrentDevice().catch(() => {
-      // The visible controls still let the collaborator retry and run a test.
-    });
+    void subscribeCurrentDevice()
+      .then(() => {
+        if (refreshKey) window.sessionStorage.setItem(refreshKey, '1');
+      })
+      .catch(() => {
+        // The visible controls still let the collaborator retry and run a test.
+      });
   }, []);
 
   return null;
