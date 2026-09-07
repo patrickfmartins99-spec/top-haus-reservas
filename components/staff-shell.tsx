@@ -30,6 +30,7 @@ import {
 } from 'lucide-react';
 
 import {
+  StaffPushBootstrap,
   StaffPushControls,
   removeStaffPush,
 } from '@/components/staff-push-controls';
@@ -294,6 +295,7 @@ export function StaffShell({ children }: { children: ReactNode }) {
 
   return (
     <StaffSession.Provider value={{ profile, refresh: refreshProfile }}>
+      <StaffPushBootstrap />
       <main className="min-h-screen bg-[#efede8] text-haus-ink">
         <div className="grid min-h-screen lg:grid-cols-[252px_1fr]">
           <aside className="hidden border-r border-white/10 bg-black px-4 py-6 text-white lg:flex lg:flex-col">
