@@ -203,11 +203,11 @@ export default function MinhaReservaPage() {
     <main className="min-h-screen bg-[#efede8] text-haus-ink">
       <header className="border-b border-white/10 bg-black text-white">
         <div className="mx-auto flex h-20 max-w-6xl items-center justify-between px-5 sm:px-8">
-          <Link href="/" aria-label="Top Haus — página inicial">
+          <Link href="/cliente" aria-label="Top Haus — página inicial">
             <BrandLogo compact priority className="rounded-md" />
           </Link>
           <Link
-            href="/"
+            href="/cliente"
             className="flex items-center gap-2 text-sm font-medium text-white/90 transition hover:text-white"
           >
             <ArrowLeft className="size-4" /> Voltar para reservas

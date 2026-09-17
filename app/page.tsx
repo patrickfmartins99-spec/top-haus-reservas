@@ -225,7 +225,7 @@ export default function Home() {
           </a>
           <div className="flex items-center gap-2">
             <Link
-              href="/minha-reserva"
+              href="/cliente/minha-reserva"
               className="flex items-center gap-2 rounded-full border border-white/15 px-4 py-2 text-sm font-medium text-white/85 transition hover:border-haus-gold/60 hover:text-white"
             >
               Consultar reserva
@@ -317,7 +317,7 @@ export default function Home() {
                   </p>
                   <div className="mt-6 flex flex-wrap justify-center gap-3">
                     <Link
-                      href={`/minha-reserva?codigo=${encodeURIComponent(result.reservationCode)}`}
+                      href={`/cliente/minha-reserva?codigo=${encodeURIComponent(result.reservationCode)}`}
                       className="inline-flex h-8 items-center justify-center rounded-lg border border-black/15 px-3 text-sm font-semibold hover:bg-black/5"
                     >
                       Consultar esta reserva
