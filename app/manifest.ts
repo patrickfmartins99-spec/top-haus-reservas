@@ -1,6 +1,6 @@
 import type { MetadataRoute } from 'next';
 
-const isStaffSurface = process.env.APP_SURFACE !== 'cliente';
+const isStaffSurface = false;
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
