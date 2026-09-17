@@ -1,7 +1,7 @@
 import type { Metadata, Viewport } from 'next';
 import './globals.css';
 
-const isStaffSurface = process.env.APP_SURFACE !== 'cliente';
+const isStaffSurface = false;
 
 export const metadata: Metadata = {
   metadataBase: new URL(
