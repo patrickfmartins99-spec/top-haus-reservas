@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import Script from 'next/script';
 
 export const metadata: Metadata = {
   title: 'Equipe | Top Haus Reservas',
@@ -11,5 +12,12 @@ export const metadata: Metadata = {
 export default function StaffLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
-  return children;
+  return (
+    <>
+      {children}
+      <Script id="staff-service-worker" strategy="afterInteractive">
+        {`if ('serviceWorker' in navigator) { navigator.serviceWorker.register('/sw.js').catch(() => undefined); }`}
+      </Script>
+    </>
+  );
 }
