@@ -29,10 +29,14 @@ type AuditEvent = {
   tableChange: string | null;
   reason: string | null;
   note: string | null;
+  exceptions?: string[];
 };
 
 const actionLabels: Record<string, string> = {
   reservation_created: 'Criou uma reserva',
+  reservation_approved: 'Aprovou uma reserva',
+  reservation_refused: 'Recusou uma solicitação de reserva',
+  reservation_no_show: 'Registrou não comparecimento',
   reservation_updated: 'Alterou uma reserva',
   reservation_updated_by_customer: 'Alterou a própria reserva',
   reservation_presence_confirmed: 'Confirmou presença',
@@ -88,7 +92,7 @@ function eventDetail(event: AuditEvent) {
     event.fromStatus && event.toStatus && event.fromStatus !== event.toStatus
       ? ` · ${statusLabels[event.fromStatus] ?? event.fromStatus} → ${statusLabels[event.toStatus] ?? event.toStatus}`
       : '';
-  return `${code ?? 'Registro'}${statusChange}${event.tableChange ? ` · Mesa: ${event.tableChange}` : ''}${event.reason ? ` · Motivo: ${event.reason}` : ''}${event.note ? ` · ${event.note}` : ''}`;
+  return `${code ?? 'Registro'}${statusChange}${event.tableChange ? ` · Mesa: ${event.tableChange}` : ''}${event.reason ? ` · Motivo: ${event.reason}` : ''}${event.note ? ` · ${event.note}` : ''}${event.exceptions?.length ? ` · ${event.exceptions.join(' · ')}` : ''}`;
 }
 
 export default function AuditPage() {
@@ -178,52 +182,75 @@ export default function AuditPage() {
             </p>
           ) : null}
           {!loading && events.length > 0 ? (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Data e horário</TableHead>
-                  <TableHead>Responsável</TableHead>
-                  <TableHead>Ação</TableHead>
-                  <TableHead>Detalhes</TableHead>
-                  <TableHead>Origem</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
+            <>
+              <div className="space-y-3 md:hidden">
                 {events.map((event) => (
-                  <TableRow key={event.id}>
-                    <TableCell className="whitespace-nowrap font-mono text-xs font-semibold text-black/70">
+                  <article
+                    key={event.id}
+                    className="space-y-2 rounded-xl border border-stone-200 bg-stone-50 p-4"
+                  >
+                    <p className="text-xs font-medium text-stone-700">
                       {formatDateTime(event.createdAt)}
-                    </TableCell>
-                    <TableCell className="font-semibold">
-                      {event.actorName}
-                    </TableCell>
-                    <TableCell>
+                    </p>
+                    <h2 className="font-bold">
+                      {event.actorName} ·{' '}
                       {actionLabels[event.action] ?? event.action}
-                    </TableCell>
-                    <TableCell className="font-medium text-black/70">
+                    </h2>
+                    <p className="break-words text-sm leading-6 text-stone-700">
                       {eventDetail(event)}
-                    </TableCell>
-                    <TableCell>
-                      <Badge
-                        className={
-                          event.actorType === 'customer'
-                            ? 'bg-black text-white'
-                            : event.actorType === 'system'
-                              ? 'bg-haus-gold/20 text-[#6b451c]'
-                              : 'bg-[#e7e1db] text-[#4f3528]'
-                        }
-                      >
-                        {event.actorType === 'customer'
-                          ? 'Cliente'
-                          : event.actorType === 'system'
-                            ? 'Automação'
-                            : 'Colaborador'}
-                      </Badge>
-                    </TableCell>
-                  </TableRow>
+                    </p>
+                  </article>
                 ))}
-              </TableBody>
-            </Table>
+              </div>
+              <div className="hidden md:block">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Data e horário</TableHead>
+                      <TableHead>Responsável</TableHead>
+                      <TableHead>Ação</TableHead>
+                      <TableHead>Detalhes</TableHead>
+                      <TableHead>Origem</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {events.map((event) => (
+                      <TableRow key={event.id}>
+                        <TableCell className="whitespace-nowrap font-mono text-xs font-semibold text-black/70">
+                          {formatDateTime(event.createdAt)}
+                        </TableCell>
+                        <TableCell className="font-semibold">
+                          {event.actorName}
+                        </TableCell>
+                        <TableCell>
+                          {actionLabels[event.action] ?? event.action}
+                        </TableCell>
+                        <TableCell className="font-medium text-black/70">
+                          {eventDetail(event)}
+                        </TableCell>
+                        <TableCell>
+                          <Badge
+                            className={
+                              event.actorType === 'customer'
+                                ? 'bg-black text-white'
+                                : event.actorType === 'system'
+                                  ? 'bg-haus-gold/20 text-[#6b451c]'
+                                  : 'bg-[#e7e1db] text-[#4f3528]'
+                            }
+                          >
+                            {event.actorType === 'customer'
+                              ? 'Cliente'
+                              : event.actorType === 'system'
+                                ? 'Automação'
+                                : 'Colaborador'}
+                          </Badge>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            </>
           ) : null}
         </CardContent>
       </Card>

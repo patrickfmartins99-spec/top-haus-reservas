@@ -36,6 +36,7 @@ import {
 } from '@/components/staff-push-controls';
 import { StaffSession, type StaffProfile } from '@/components/staff-session';
 import { BrandLogo } from '@/components/brand-logo';
+import { StaffLaunchScreen } from '@/components/staff-launch-screen';
 import { buttonVariants } from '@/components/ui/button';
 import {
   Popover,
@@ -236,6 +237,7 @@ export function StaffShell({ children }: { children: ReactNode }) {
   if (checkingSession) {
     return (
       <main className="grid min-h-screen place-items-center bg-[#efede8] text-haus-ink">
+        <StaffLaunchScreen />
         <p className="flex items-center gap-2 text-sm font-medium">
           <LoaderCircle className="size-4 animate-spin" /> Abrindo o painel...
         </p>

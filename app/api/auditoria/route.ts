@@ -83,6 +83,14 @@ export async function GET(request: Request) {
           ? data.changes.reasonLabel
           : null,
       note: typeof data.changes?.note === 'string' ? data.changes.note : null,
+      exceptions: [
+        data.bookingExceptions?.deadlineOverride
+          ? 'Prazo online liberado pela equipe'
+          : null,
+        data.bookingExceptions?.capacityOverride
+          ? `Cota excedida por decisão da equipe: ${Number(data.bookingExceptions.heldSeatsAfter)} lugares reservados / cota ${Number(data.bookingExceptions.capacityLimit)}`
+          : null,
+      ].filter(Boolean),
       tableChange:
         data.action === 'reservation_table_assigned'
           ? `${String(data.changes?.before?.tableLabel || 'não definida')} → ${String(data.changes?.after?.tableLabel || 'não definida')}`

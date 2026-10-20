@@ -2,16 +2,33 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { signInWithEmailAndPassword } from 'firebase/auth';
-import { Check, CircleAlert, CloudCheck, LoaderCircle, LockKeyhole } from 'lucide-react';
+import { onAuthStateChanged, signInWithEmailAndPassword } from 'firebase/auth';
+import {
+  Check,
+  CircleAlert,
+  CloudCheck,
+  LoaderCircle,
+  LockKeyhole,
+} from 'lucide-react';
 
 import { BrandLogo } from '@/components/brand-logo';
+import { StaffLaunchScreen } from '@/components/staff-launch-screen';
+import { StaffInstallButton } from '@/components/staff-install-button';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { getFirebaseClient, isFirebaseConfigured } from '@/lib/firebase/client';
-import { isValidUsername, staffEmailFromUsername } from '@/lib/auth/staff-identity';
+import {
+  isValidUsername,
+  staffEmailFromUsername,
+} from '@/lib/auth/staff-identity';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -19,9 +36,33 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [checkingSavedSession, setCheckingSavedSession] =
+    useState(isFirebaseConfigured);
+  const [hasSavedSession, setHasSavedSession] = useState(false);
   const [firebaseStatus, setFirebaseStatus] = useState<
     'checking' | 'connected' | 'not_configured' | 'quota_exceeded' | 'error'
   >('checking');
+
+  useEffect(() => {
+    const firebase = getFirebaseClient();
+    if (!firebase) return;
+    const timeout = window.setTimeout(
+      () => setCheckingSavedSession(false),
+      6000,
+    );
+    const unsubscribe = onAuthStateChanged(firebase.auth, (user) => {
+      setHasSavedSession(Boolean(user));
+      const installed =
+        window.matchMedia('(display-mode: standalone)').matches ||
+        Boolean((navigator as Navigator & { standalone?: boolean }).standalone);
+      if (user && installed) router.replace('/painel');
+      else setCheckingSavedSession(false);
+    });
+    return () => {
+      window.clearTimeout(timeout);
+      unsubscribe();
+    };
+  }, [router]);
 
   useEffect(() => {
     let active = true;
@@ -29,15 +70,17 @@ export default function LoginPage() {
     const timeout = window.setTimeout(() => controller.abort(), 6_000);
     fetch('/api/status', { cache: 'no-store', signal: controller.signal })
       .then((response) => response.json())
-      .then((data: {
-        firebase?:
-          | 'connected'
-          | 'not_configured'
-          | 'quota_exceeded'
-          | 'error';
-      }) => {
-        if (active) setFirebaseStatus(data.firebase ?? 'error');
-      })
+      .then(
+        (data: {
+          firebase?:
+            | 'connected'
+            | 'not_configured'
+            | 'quota_exceeded'
+            | 'error';
+        }) => {
+          if (active) setFirebaseStatus(data.firebase ?? 'error');
+        },
+      )
       .catch(() => {
         if (active) setFirebaseStatus('error');
       });
@@ -51,7 +94,9 @@ export default function LoginPage() {
   async function signIn(event: React.SyntheticEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!isFirebaseConfigured) {
-      setError('Conecte o projeto Firebase para habilitar o acesso dos colaboradores.');
+      setError(
+        'Conecte o projeto Firebase para habilitar o acesso dos colaboradores.',
+      );
       return;
     }
     if (!isValidUsername(username)) {
@@ -63,7 +108,11 @@ export default function LoginPage() {
     try {
       const firebase = getFirebaseClient();
       if (!firebase) throw new Error('Firebase indisponível.');
-      await signInWithEmailAndPassword(firebase.auth, staffEmailFromUsername(username), password);
+      await signInWithEmailAndPassword(
+        firebase.auth,
+        staffEmailFromUsername(username),
+        password,
+      );
       router.push('/painel');
     } catch {
       setError('Usuário ou senha inválidos.');
@@ -74,39 +123,88 @@ export default function LoginPage() {
 
   return (
     <main className="min-h-screen bg-[#efede8] text-haus-ink">
+      {checkingSavedSession && <StaffLaunchScreen />}
       <div className="grid min-h-screen lg:grid-cols-[1.05fr_0.95fr]">
         <section className="relative hidden overflow-hidden bg-black p-12 text-white lg:flex lg:flex-col">
-          <div className="absolute -bottom-48 -left-40 size-[34rem] rounded-full border border-haus-gold/15" aria-hidden="true" />
-          <div className="absolute -bottom-24 -left-24 size-[24rem] rounded-full border border-haus-gold/15" aria-hidden="true" />
+          <div
+            className="absolute -bottom-48 -left-40 size-[34rem] rounded-full border border-haus-gold/15"
+            aria-hidden="true"
+          />
+          <div
+            className="absolute -bottom-24 -left-24 size-[24rem] rounded-full border border-haus-gold/15"
+            aria-hidden="true"
+          />
           <BrandLogo priority className="relative rounded-lg" />
           <div className="relative my-auto max-w-lg py-12">
-            <p className="text-xs font-bold uppercase tracking-[0.2em] text-haus-gold">Ambiente interno</p>
-            <h1 className="mt-4 text-5xl font-extrabold leading-[1.05] tracking-[-0.04em]">A operação do salão em um só lugar.</h1>
-            <p className="mt-6 max-w-md text-lg leading-8 text-white/80">Reservas, aprovações e fila de espera organizadas para toda a equipe.</p>
+            <p className="text-xs font-bold uppercase tracking-[0.2em] text-haus-gold">
+              Ambiente interno
+            </p>
+            <h1 className="mt-4 text-5xl font-extrabold leading-[1.05] tracking-[-0.04em]">
+              A operação do salão em um só lugar.
+            </h1>
+            <p className="mt-6 max-w-md text-lg leading-8 text-white/80">
+              Reservas, aprovações e fila de espera organizadas para toda a
+              equipe.
+            </p>
             <div className="mt-10 space-y-4 text-sm text-white/85">
-              <p className="flex items-center gap-3"><span className="grid size-7 place-items-center rounded-full bg-white/10"><Check className="size-4 text-haus-gold" /></span> Acesso individual por colaborador</p>
-              <p className="flex items-center gap-3"><span className="grid size-7 place-items-center rounded-full bg-white/10"><Check className="size-4 text-haus-gold" /></span> Histórico de alterações e aprovações</p>
-              <p className="flex items-center gap-3"><span className="grid size-7 place-items-center rounded-full bg-white/10"><Check className="size-4 text-haus-gold" /></span> Experiência preparada para celular e tablet</p>
+              <p className="flex items-center gap-3">
+                <span className="grid size-7 place-items-center rounded-full bg-white/10">
+                  <Check className="size-4 text-haus-gold" />
+                </span>{' '}
+                Acesso individual por colaborador
+              </p>
+              <p className="flex items-center gap-3">
+                <span className="grid size-7 place-items-center rounded-full bg-white/10">
+                  <Check className="size-4 text-haus-gold" />
+                </span>{' '}
+                Histórico de alterações e aprovações
+              </p>
+              <p className="flex items-center gap-3">
+                <span className="grid size-7 place-items-center rounded-full bg-white/10">
+                  <Check className="size-4 text-haus-gold" />
+                </span>{' '}
+                Experiência preparada para celular e tablet
+              </p>
             </div>
           </div>
-          <p className="relative text-xs text-white/60">Top Haus · Sistema de reservas</p>
+          <p className="relative text-xs text-white/60">
+            Top Haus · Sistema de reservas
+          </p>
         </section>
 
         <section className="flex min-h-screen items-center justify-center px-5 py-10 sm:px-10">
           <Card className="w-full max-w-md border-0 bg-[#fdfcf9] py-2 shadow-[0_24px_70px_rgba(0,0,0,0.12)] ring-black/5">
             <CardHeader className="pb-3">
-              <BrandLogo compact priority className="mb-5 rounded-md lg:hidden" />
-              <p className="text-xs font-bold uppercase tracking-[0.16em] text-haus-terracotta">Acesso do colaborador</p>
-              <CardTitle className="mt-2 text-3xl font-extrabold tracking-[-0.03em]">Bem-vindo de volta.</CardTitle>
-              <CardDescription className="mt-1 leading-6">Entre com o seu usuário individual para acessar as reservas.</CardDescription>
-              <div className={`mt-4 flex items-center gap-2 rounded-xl border px-3 py-2.5 text-xs font-semibold ${
-                firebaseStatus === 'connected'
-                  ? 'border-emerald-700/20 bg-emerald-50 text-emerald-800'
-                  : firebaseStatus === 'checking'
-                    ? 'border-black/10 bg-black/[0.03] text-black/60'
-                    : 'border-amber-700/20 bg-amber-50 text-amber-900'
-              }`}>
-                {firebaseStatus === 'checking' ? <LoaderCircle className="size-4 animate-spin" /> : firebaseStatus === 'connected' ? <CloudCheck className="size-4" /> : <CircleAlert className="size-4" />}
+              <BrandLogo
+                compact
+                priority
+                className="mb-5 rounded-md lg:hidden"
+              />
+              <p className="text-xs font-bold uppercase tracking-[0.16em] text-haus-terracotta">
+                Acesso do colaborador
+              </p>
+              <CardTitle className="mt-2 text-3xl font-extrabold tracking-[-0.03em]">
+                Bem-vindo de volta.
+              </CardTitle>
+              <CardDescription className="mt-1 leading-6">
+                Entre com o seu usuário individual para acessar as reservas.
+              </CardDescription>
+              <div
+                className={`mt-4 flex items-center gap-2 rounded-xl border px-3 py-2.5 text-xs font-semibold ${
+                  firebaseStatus === 'connected'
+                    ? 'border-emerald-700/20 bg-emerald-50 text-emerald-800'
+                    : firebaseStatus === 'checking'
+                      ? 'border-black/10 bg-black/[0.03] text-black/60'
+                      : 'border-amber-700/20 bg-amber-50 text-amber-900'
+                }`}
+              >
+                {firebaseStatus === 'checking' ? (
+                  <LoaderCircle className="size-4 animate-spin" />
+                ) : firebaseStatus === 'connected' ? (
+                  <CloudCheck className="size-4" />
+                ) : (
+                  <CircleAlert className="size-4" />
+                )}
                 {firebaseStatus === 'checking'
                   ? 'Verificando conexão com o Firebase...'
                   : firebaseStatus === 'connected'
@@ -115,17 +213,79 @@ export default function LoginPage() {
                       ? 'Firebase ainda não configurado no Netlify'
                       : firebaseStatus === 'quota_exceeded'
                         ? 'Limite diário do Firebase atingido'
-                      : 'Não foi possível acessar o Firebase'}
+                        : 'Não foi possível acessar o Firebase'}
               </div>
             </CardHeader>
             <CardContent>
+              {hasSavedSession && (
+                <Button
+                  className="mb-5 min-h-12 w-full"
+                  onClick={() => router.push('/painel')}
+                >
+                  Continuar no painel
+                </Button>
+              )}
               <form onSubmit={signIn} className="space-y-5">
-                <div className="space-y-2"><Label htmlFor="username">Usuário</Label><Input id="username" type="text" value={username} onChange={(event) => setUsername(event.target.value.toLowerCase())} className="h-12 bg-white" autoCapitalize="none" autoCorrect="off" autoComplete="username" placeholder="Ex.: patrickf" required /></div>
-                <div className="space-y-2"><div className="flex items-center justify-between"><Label htmlFor="password">Senha</Label><span className="text-xs text-black/40">Mínimo de 8 caracteres</span></div><Input id="password" type="password" value={password} onChange={(event) => setPassword(event.target.value)} className="h-12 bg-white" autoComplete="current-password" required /></div>
-                {error && <p className="rounded-xl bg-destructive/10 px-4 py-3 text-sm text-destructive" role="alert">{error}</p>}
-                <Button type="submit" disabled={loading} className="h-12 w-full bg-black text-base font-bold text-white hover:bg-black/85">{loading ? <LoaderCircle className="size-5 animate-spin" /> : <LockKeyhole className="size-5" />} {loading ? 'Entrando...' : 'Entrar no painel'}</Button>
-                <p className="text-center text-xs leading-5 text-black/40">Problemas com o acesso? Solicite a redefinição da senha ao administrador.</p>
+                <div className="space-y-2">
+                  <Label htmlFor="username">Usuário</Label>
+                  <Input
+                    id="username"
+                    type="text"
+                    value={username}
+                    onChange={(event) =>
+                      setUsername(event.target.value.toLowerCase())
+                    }
+                    className="h-12 bg-white"
+                    autoCapitalize="none"
+                    autoCorrect="off"
+                    autoComplete="username"
+                    placeholder="Ex.: patrickf"
+                    required
+                  />
+                </div>
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <Label htmlFor="password">Senha</Label>
+                    <span className="text-xs text-black/40">
+                      Mínimo de 8 caracteres
+                    </span>
+                  </div>
+                  <Input
+                    id="password"
+                    type="password"
+                    value={password}
+                    onChange={(event) => setPassword(event.target.value)}
+                    className="h-12 bg-white"
+                    autoComplete="current-password"
+                    required
+                  />
+                </div>
+                {error && (
+                  <p
+                    className="rounded-xl bg-destructive/10 px-4 py-3 text-sm text-destructive"
+                    role="alert"
+                  >
+                    {error}
+                  </p>
+                )}
+                <Button
+                  type="submit"
+                  disabled={loading}
+                  className="h-12 w-full bg-black text-base font-bold text-white hover:bg-black/85"
+                >
+                  {loading ? (
+                    <LoaderCircle className="size-5 animate-spin" />
+                  ) : (
+                    <LockKeyhole className="size-5" />
+                  )}{' '}
+                  {loading ? 'Entrando...' : 'Entrar no painel'}
+                </Button>
+                <p className="text-center text-xs leading-5 text-black/40">
+                  Problemas com o acesso? Solicite a redefinição da senha ao
+                  administrador.
+                </p>
               </form>
+              <StaffInstallButton />
             </CardContent>
           </Card>
         </section>

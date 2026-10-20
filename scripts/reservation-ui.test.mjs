@@ -8,6 +8,9 @@ const output = new URL('../../../validation-reservations/', import.meta.url);
 await mkdir(output, { recursive: true });
 const browser = await puppeteer.launch({
   headless: true,
+  ...(process.env.TEST_CHROME_PATH
+    ? { executablePath: process.env.TEST_CHROME_PATH }
+    : {}),
   args: ['--no-sandbox'],
   handleSIGINT: false,
 });
@@ -284,6 +287,8 @@ async function waitText(text) {
 try {
   await page.setViewport({ width: 390, height: 844, deviceScaleFactor: 1 });
   await page.goto(`${base}/`, { waitUntil: 'networkidle0' });
+  assert.equal(await page.$('link[rel="manifest"]'), null);
+  await waitText('Bons momentos começam à mesa.');
   await waitText('Fazer uma reserva');
   await page.$eval('#date', (input) => {
     const set = Object.getOwnPropertyDescriptor(
@@ -309,15 +314,77 @@ try {
     fullPage: true,
   });
   console.log('PASS: reserva de cliente sem sino e com código curto.');
+  await page.goto(`${base}/minha-reserva`, { waitUntil: 'networkidle0' });
+  await page.type('#reservation-code', reservation.reservationCode);
+  await page.type('#reservation-whatsapp', reservation.whatsapp);
+  await click('Consultar reserva');
+  await waitText('Em nome de Mariana Teste');
+  console.log(
+    'PASS: formulário de consulta encontra a reserva na resposta simulada.',
+  );
   await page.goto(`${base}/entrar`, {
     waitUntil: 'networkidle0',
   });
+  assert.equal(
+    await page.$eval('link[rel="manifest"]', (element) =>
+      element.getAttribute('href'),
+    ),
+    '/entrar/manifest.webmanifest',
+  );
+  const manifest = await page.evaluate(async () =>
+    (await fetch('/entrar/manifest.webmanifest')).json(),
+  );
+  assert.equal(manifest.start_url, '/entrar');
+  assert.equal(manifest.background_color, '#000000');
+  assert.equal(manifest.icons.length, 3);
+  for (const icon of manifest.icons) {
+    const result = await page.evaluate(async (src) => {
+      const response = await fetch(src);
+      return {
+        status: response.status,
+        type: response.headers.get('content-type'),
+      };
+    }, icon.src);
+    assert.equal(result.status, 200);
+    assert.match(result.type, /image\/png/);
+  }
+  await waitText('Instalar aplicativo da equipe');
+  console.log(
+    'PASS: instalação oferecida na entrada; manifesto e ícones disponíveis com abertura em /entrar e fundo preto.',
+  );
   await page.type('#username', 'stafftest');
   await page.type('#password', 'somente-teste-local');
   await click('Entrar no painel');
   await waitText('Reservas de hoje');
   await waitText('Mariana Teste');
   await waitText('Cliente da Fila');
+  reservation.status = 'pending_approval';
+  await page.reload({ waitUntil: 'networkidle0' });
+  await waitText('Esta solicitação precisa de uma decisão da equipe.');
+  await page.screenshot({
+    path: new URL('aprovacao-mobile.png', output).pathname.replace(
+      /^\/(\w:)/,
+      '$1',
+    ),
+    fullPage: true,
+  });
+  await click('Aprovar');
+  await waitText('Reserva aprovada e comunicação gerada.');
+  assert.equal(reservation.status, 'confirmed');
+  reservation.status = 'pending_approval';
+  await page.reload({ waitUntil: 'networkidle0' });
+  await waitText('Esta solicitação precisa de uma decisão da equipe.');
+  await click('Recusar');
+  await page.select('#outcome-reason', 'changed_plans');
+  await click('Registrar recusa');
+  await waitText('Solicitação recusada e motivo registrado.');
+  assert.equal(reservation.status, 'cancelled');
+  reservation.status = 'confirmed';
+  await page.reload({ waitUntil: 'networkidle0' });
+  await waitText('Mariana Teste');
+  console.log(
+    'PASS: aprovar e recusar diretamente no card, com motivo e atualização local.',
+  );
   firebaseUnavailable = true;
   await page.reload({ waitUntil: 'networkidle0' });
   await waitText('Modo de contingência');

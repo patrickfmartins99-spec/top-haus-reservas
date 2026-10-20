@@ -54,6 +54,28 @@
 
 body { font-family: var(--font-body); }
 
+.staff-launch-screen {
+  display: none;
+}
+@media (display-mode: standalone), (display-mode: fullscreen) {
+  .staff-launch-screen {
+    position: fixed;
+    inset: 0;
+    z-index: 100;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: #000;
+    color: #fff;
+    min-height: 100dvh;
+    padding: 2rem;
+  }
+  .staff-launch-screen img { width: min(76vw, 340px); height: auto; }
+  .staff-launch-screen p { margin-top: 1.25rem; font-size: 1.3rem; font-weight: 700; letter-spacing: .24em; }
+  .staff-launch-screen span { margin-top: 2rem; font-size: .875rem; color: #d6d3d1; }
+}
+
 :root {
   --font-body: ui-rounded, "SF Pro Rounded", "Segoe UI", Inter, Arial, sans-serif;
   --font-display: ui-rounded, "SF Pro Rounded", "Segoe UI", Inter, Arial, sans-serif;

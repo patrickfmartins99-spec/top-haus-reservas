@@ -9,7 +9,9 @@ import {
   isReservationInput,
   reservationInstant,
   canBook,
+  brazilDate,
 } from '@/lib/domain/reservations';
+import { bookingExceptions } from '@/lib/domain/booking-policy';
 import { requireStaff } from '@/lib/auth/staff-request';
 import { getOperationalSettings } from '@/lib/domain/operational-settings';
 import {
@@ -59,6 +61,7 @@ function serializeReservation(document: {
     outcomeReasonLabel: String(data.outcomeReasonLabel ?? ''),
     outcomeNote: String(data.outcomeNote ?? ''),
     createdAt: serializeTimestamp(data.createdAt),
+    updatedAt: serializeTimestamp(data.updatedAt),
   };
 }
 
@@ -81,6 +84,7 @@ export async function GET(request: Request) {
   const serviceDate = url.searchParams.get('data') ?? '';
   const reservationId = url.searchParams.get('id') ?? '';
   let reservations;
+  let nextCursor: string | null = null;
 
   if (/^[A-Za-z0-9_-]{1,160}$/.test(reservationId)) {
     const document = await database
@@ -92,23 +96,38 @@ export async function GET(request: Request) {
         ? [serializeReservation(document)]
         : [];
   } else {
-    const snapshot = /^\d{4}-\d{2}-\d{2}$/.test(serviceDate)
-      ? await database
+    const dated = /^\d{4}-\d{2}-\d{2}$/.test(serviceDate);
+    const pageSize = dated ? 200 : 50;
+    let query = dated
+      ? database
           .collection('reservations')
           .where('serviceDate', '==', serviceDate)
-          .limit(200)
-          .get()
-      : await database
-          .collection('reservations')
-          .orderBy('createdAt', 'desc')
-          .limit(300)
-          .get();
-    reservations = snapshot.docs
+      : database.collection('reservations').orderBy('createdAt', 'desc');
+    const cursor = url.searchParams.get('cursor');
+    if (cursor) {
+      if (!/^[A-Za-z0-9_-]{1,160}$/.test(cursor))
+        return NextResponse.json(
+          { error: 'Página inválida.' },
+          { status: 400 },
+        );
+      const last = await database.collection('reservations').doc(cursor).get();
+      if (!last.exists || (dated && last.data()?.serviceDate !== serviceDate))
+        return NextResponse.json(
+          { error: 'Atualize a lista para continuar.' },
+          { status: 409 },
+        );
+      query = query.startAfter(last);
+    }
+    const snapshot = await query.limit(pageSize + 1).get();
+    const documents = snapshot.docs.slice(0, pageSize);
+    if (snapshot.docs.length > pageSize)
+      nextCursor = documents.at(-1)?.id ?? null;
+    reservations = documents
       .filter((document) => !document.data().deletedAt)
       .map(serializeReservation);
   }
 
-  return NextResponse.json({ reservations });
+  return NextResponse.json({ reservations, nextCursor });
 }
 
 export async function POST(request: Request) {
@@ -169,7 +188,14 @@ export async function POST(request: Request) {
     );
   }
   const instant = reservationInstant(payload);
-  if (!canBook(payload, settings.minAdvanceHours)) {
+  const deadlinePassed = !canBook(payload, settings.minAdvanceHours);
+  if (staffContext && payload.serviceDate < brazilDate()) {
+    return NextResponse.json(
+      { error: 'Escolha hoje ou uma data futura para a nova reserva.' },
+      { status: 400 },
+    );
+  }
+  if (!staffContext && deadlinePassed) {
     return NextResponse.json(
       {
         error:
@@ -276,7 +302,14 @@ export async function POST(request: Request) {
         Number(specialDate?.capacityLimit) > 0
           ? Number(specialDate?.capacityLimit)
           : settings.capacityPerService;
-      if (heldSeats + payload.partySize > effectiveCapacity) {
+      const exceptions = bookingExceptions({
+        staff: Boolean(staffContext),
+        deadlinePassed,
+        heldSeats,
+        partySize: payload.partySize,
+        capacity: effectiveCapacity,
+      });
+      if (!exceptions.allowed) {
         throw new Error('CAPACITY_EXCEEDED');
       }
 
@@ -304,6 +337,7 @@ export async function POST(request: Request) {
         status,
         source: staffContext ? 'staff_phone' : 'customer_web',
         createdBy: staffContext?.decodedToken.uid ?? null,
+        bookingExceptions: exceptions,
         createdAt: FieldValue.serverTimestamp(),
         updatedAt: FieldValue.serverTimestamp(),
       });
@@ -313,6 +347,7 @@ export async function POST(request: Request) {
         actorType: staffContext ? 'staff' : 'customer',
         actorId: staffContext?.decodedToken.uid ?? null,
         action: 'reservation_created',
+        bookingExceptions: exceptions,
         fromStatus: null,
         toStatus: status,
         createdAt: FieldValue.serverTimestamp(),

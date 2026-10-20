@@ -4,10 +4,15 @@ import { after, NextResponse } from 'next/server';
 
 import { requireStaff } from '@/lib/auth/staff-request';
 import {
+  bookingExceptions,
+  canApplyQuickStatus,
+} from '@/lib/domain/booking-policy';
+import {
   ALLOWED_TIMES,
   isMonday,
   isReservationInput,
   reservationInstant,
+  canBook,
   type ReservationStatus,
 } from '@/lib/domain/reservations';
 import {
@@ -114,7 +119,10 @@ export async function PATCH(
   }
   if (payload?.action === 'set_status') {
     const status =
-      payload.status === 'seated' || payload.status === 'no_show'
+      payload.status === 'seated' ||
+      payload.status === 'no_show' ||
+      payload.status === 'confirmed' ||
+      payload.status === 'cancelled'
         ? payload.status
         : null;
     if (!status)
@@ -131,6 +139,12 @@ export async function PATCH(
           RESERVATION_NO_SHOW_REASONS,
           payload.note,
         );
+      } else if (status === 'cancelled') {
+        outcome = outcomeReason(
+          payload.reason,
+          RESERVATION_CANCELLATION_REASONS,
+          payload.note,
+        );
       }
     } catch (error) {
       return NextResponse.json(
@@ -139,7 +153,7 @@ export async function PATCH(
             error instanceof Error &&
             error.message === 'REASON_DETAILS_REQUIRED'
               ? 'Descreva o outro motivo.'
-              : 'Selecione o motivo do não comparecimento.',
+              : 'Selecione o motivo para encerrar a reserva.',
         },
         { status: 400 },
       );
@@ -155,7 +169,7 @@ export async function PATCH(
     const reservationRef = database.collection('reservations').doc(id);
 
     try {
-      await database.runTransaction(async (transaction) => {
+      const changed = await database.runTransaction(async (transaction) => {
         const snapshot = await transaction.get(reservationRef);
         if (!snapshot.exists || snapshot.data()?.deletedAt)
           throw new Error('NOT_FOUND');
@@ -163,16 +177,15 @@ export async function PATCH(
         const previousStatus = String(
           previous.status ?? 'confirmed',
         ) as ReservationStatus;
-        if (previousStatus === status) return;
-        if (
-          ['cancelled', 'completed', 'seated', 'no_show'].includes(
-            previousStatus,
-          )
-        ) {
+        if (previousStatus === status) return false;
+        if (!canApplyQuickStatus(previousStatus, status)) {
           throw new Error('INVALID_TRANSITION');
         }
 
-        if (status === 'no_show' && capacityStatuses.has(previousStatus)) {
+        if (
+          ['no_show', 'cancelled'].includes(status) &&
+          capacityStatuses.has(previousStatus)
+        ) {
           const capacityRef = database
             .collection('serviceCapacity')
             .doc(
@@ -202,9 +215,23 @@ export async function PATCH(
                 outcomeReasonLabel: outcome.reasonLabel,
                 outcomeNote: outcome.note,
               }
-            : {
-                seatedAt: FieldValue.serverTimestamp(),
-              };
+            : status === 'cancelled' && outcome
+              ? {
+                  cancelledAt: FieldValue.serverTimestamp(),
+                  cancelledBy: context.decodedToken.uid,
+                  cancellationActorType: 'staff',
+                  cancellationReason: outcome.reason,
+                  cancellationReasonLabel: outcome.reasonLabel,
+                  cancellationNote: outcome.note,
+                }
+              : status === 'seated'
+                ? {
+                    seatedAt: FieldValue.serverTimestamp(),
+                  }
+                : {
+                    approvedAt: FieldValue.serverTimestamp(),
+                    approvedBy: context.decodedToken.uid,
+                  };
         transaction.update(reservationRef, {
           status,
           ...outcomeFields,
@@ -216,7 +243,13 @@ export async function PATCH(
           actorType: 'staff',
           actorId: context.decodedToken.uid,
           action:
-            status === 'seated' ? 'reservation_arrived' : 'reservation_no_show',
+            status === 'seated'
+              ? 'reservation_arrived'
+              : status === 'confirmed'
+                ? 'reservation_approved'
+                : status === 'cancelled'
+                  ? 'reservation_refused'
+                  : 'reservation_no_show',
           fromStatus: previousStatus,
           toStatus: status,
           changes: outcome
@@ -230,7 +263,13 @@ export async function PATCH(
         });
         enqueueReservationEvent(database, transaction, {
           eventType:
-            status === 'seated' ? 'reservation_seated' : 'reservation_no_show',
+            status === 'seated'
+              ? 'reservation_seated'
+              : status === 'confirmed'
+                ? 'reservation_approved'
+                : status === 'cancelled'
+                  ? 'reservation_cancelled'
+                  : 'reservation_no_show',
           entityType: 'reservation',
           entityId: id,
           whatsapp: String(previous.whatsapp ?? ''),
@@ -243,13 +282,22 @@ export async function PATCH(
             reservationCode: reservationCode(previous, id),
             fromStatus: previousStatus,
             toStatus: status,
+            ...(outcome
+              ? {
+                  reason: outcome.reason,
+                  reasonLabel: outcome.reasonLabel,
+                  note: outcome.note,
+                }
+              : {}),
           },
           staffNotification: {
             actorType: 'staff',
             actorName: context.user?.displayName ?? context.decodedToken.name,
           },
         });
+        return true;
       });
+      if (changed) after(() => dispatchReservationPush(database, id));
     } catch (error) {
       if (error instanceof Error && error.message === 'NOT_FOUND') {
         return NextResponse.json(
@@ -259,14 +307,16 @@ export async function PATCH(
       }
       if (error instanceof Error && error.message === 'INVALID_TRANSITION') {
         return NextResponse.json(
-          { error: 'Esta reserva já foi encerrada.' },
+          {
+            error:
+              'A situação desta reserva mudou. Atualize a lista antes de continuar.',
+          },
           { status: 409 },
         );
       }
       throw error;
     }
 
-    after(() => dispatchReservationPush(database, id));
     return NextResponse.json({ ok: true, status });
   }
   if (!payload || !isReservationInput(payload)) {
@@ -367,6 +417,12 @@ export async function PATCH(
         throw new Error('NOT_FOUND');
 
       const previous = reservationSnapshot.data() ?? {};
+      if (
+        typeof payload.updatedAt === 'string' &&
+        previous.updatedAt?.toDate?.().toISOString() !== payload.updatedAt
+      ) {
+        throw new Error('STALE_RESERVATION');
+      }
       const previousStatus = String(
         previous.status ?? 'confirmed',
       ) as ReservationStatus;
@@ -464,13 +520,23 @@ export async function PATCH(
         Number(specialDate?.capacityLimit) > 0
           ? Number(specialDate?.capacityLimit)
           : settings.capacityPerService;
+      const exceptions = bookingExceptions({
+        staff: true,
+        deadlinePassed:
+          scheduleChanged && !canBook(payload, settings.minAdvanceHours),
+        heldSeats: Math.max(
+          0,
+          Number(nextCapacitySnapshot.data()?.heldSeats ?? 0) -
+            (movingService ? 0 : previousHeldSeats),
+        ),
+        partySize: nextHeldSeats,
+        capacity: effectiveCapacity,
+      });
 
       if (movingService) {
         const currentNextHeldSeats = Number(
           nextCapacitySnapshot.data()?.heldSeats ?? 0,
         );
-        if (currentNextHeldSeats + nextHeldSeats > effectiveCapacity)
-          throw new Error('CAPACITY_EXCEEDED');
 
         transaction.set(
           previousCapacityRef,
@@ -504,11 +570,6 @@ export async function PATCH(
           0,
           currentHeldSeats - previousHeldSeats + nextHeldSeats,
         );
-        if (
-          adjustedHeldSeats > effectiveCapacity &&
-          adjustedHeldSeats > currentHeldSeats
-        )
-          throw new Error('CAPACITY_EXCEEDED');
         transaction.set(
           previousCapacityRef,
           {
@@ -539,6 +600,7 @@ export async function PATCH(
 
       transaction.update(reservationRef, {
         ...updatedReservation,
+        bookingExceptions: exceptions,
         ...(status === 'cancelled' && outcome
           ? {
               cancellationActorType: 'staff',
@@ -586,6 +648,7 @@ export async function PATCH(
         actorType: 'staff',
         actorId: context.decodedToken.uid,
         action: 'reservation_updated',
+        bookingExceptions: exceptions,
         fromStatus: previousStatus,
         toStatus: status,
         changes: {
@@ -672,6 +735,15 @@ export async function PATCH(
       }
     });
   } catch (error) {
+    if (error instanceof Error && error.message === 'STALE_RESERVATION') {
+      return NextResponse.json(
+        {
+          error:
+            'Outra ação alterou esta reserva. Feche a edição, atualize a lista e confira os dados antes de salvar novamente.',
+        },
+        { status: 409 },
+      );
+    }
     if (error instanceof Error && error.message === 'NOT_FOUND') {
       return NextResponse.json(
         { error: 'Reserva não encontrada.' },

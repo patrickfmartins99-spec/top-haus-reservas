@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { onAuthStateChanged, type User } from 'firebase/auth';
@@ -62,6 +62,7 @@ type Reservation = {
   source: string;
   notes: string;
   tableLabel: string;
+  updatedAt?: string | null;
   cancellationReason: string;
   cancellationReasonLabel: string;
   cancellationNote: string;
@@ -75,10 +76,17 @@ const times: Record<string, string[]> = {
   rodizio: ['18:30', '18:45', '19:00'],
 };
 
-async function loadReservations(user: User, serviceDate = '') {
+async function loadReservations(
+  user: User,
+  serviceDate = '',
+  cursor = '',
+  id = '',
+) {
   const token = await user.getIdToken();
   const parameters = new URLSearchParams();
   if (serviceDate) parameters.set('data', serviceDate);
+  if (cursor) parameters.set('cursor', cursor);
+  if (id) parameters.set('id', id);
   const response = await fetchWithTimeout(
     `/api/reservas${parameters.size ? `?${parameters}` : ''}`,
     {
@@ -88,7 +96,7 @@ async function loadReservations(user: User, serviceDate = '') {
   const data = await response.json();
   if (!response.ok)
     throw new Error(data.error ?? 'Não foi possível carregar as reservas.');
-  return data.reservations as Reservation[];
+  return data as { reservations: Reservation[]; nextCursor: string | null };
 }
 
 export default function ReservationsPage() {
@@ -103,13 +111,17 @@ export default function ReservationsPage() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [search, setSearch] = useState(searchParams.get('busca') ?? '');
-  const [dateFilter, setDateFilter] = useState(() =>
-    searchParams.get('busca') || searchParams.get('criada')
-      ? ''
-      : new Intl.DateTimeFormat('en-CA', {
-          timeZone: 'America/Sao_Paulo',
-        }).format(new Date()),
+  const [targetId, setTargetId] = useState(searchParams.get('busca') ?? '');
+  const [dateFilter, setDateFilter] = useState(
+    searchParams.get('data') ?? brazilDate(),
   );
+  const [statusFilter, setStatusFilter] = useState('todos');
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const loadVersion = useRef(0);
+  const invalidateLoads = useCallback(() => {
+    loadVersion.current += 1;
+  }, []);
   const [serviceFilter, setServiceFilter] = useState('todos');
   const [deleting, setDeleting] = useState<Reservation | null>(null);
   async function removeReservation(reason: string, note: string) {
@@ -145,21 +157,26 @@ export default function ReservationsPage() {
 
   const refresh = useCallback(
     async (user: User) => {
-      const items = await loadReservations(user, dateFilter);
+      const version = ++loadVersion.current;
+      const data = await loadReservations(user, dateFilter, '', targetId);
+      if (version !== loadVersion.current) return;
+      const items = data.reservations;
       setReservations(items);
+      setNextCursor(data.nextCursor);
       setOfflineSavedAt(null);
       const today = brazilDate();
-      if (!dateFilter || dateFilter === today) {
+      if (!targetId && dateFilter === today) {
         writeStaffCache(
           'reservations',
           items.filter((reservation) => reservation.serviceDate === today),
         );
       }
     },
-    [dateFilter],
+    [dateFilter, targetId],
   );
 
   useEffect(() => {
+    let active = true;
     const firebase = getFirebaseClient();
     if (!firebase) {
       const timeout = window.setTimeout(() => {
@@ -168,18 +185,14 @@ export default function ReservationsPage() {
       }, 0);
       return () => window.clearTimeout(timeout);
     }
-    return onAuthStateChanged(firebase.auth, async (user) => {
+    const unsubscribe = onAuthStateChanged(firebase.auth, async (user) => {
       if (!user) return;
+      setLoading(true);
       setCurrentUser(user);
       try {
-        const [, publicSettings] = await Promise.all([
-          refresh(user),
-          fetch('/api/configuracoes/publicas').then((response) =>
-            response.json(),
-          ),
-        ]);
-        setExceptions(publicSettings.exceptions ?? []);
+        await refresh(user);
       } catch (caughtError) {
+        if (!active) return;
         const cached = readStaffCache<Reservation[]>('reservations');
         if (cached && cacheBelongsToToday(cached.savedAt)) {
           setReservations(cached.value);
@@ -194,10 +207,76 @@ export default function ReservationsPage() {
           );
         }
       } finally {
-        setLoading(false);
+        if (active) setLoading(false);
       }
     });
-  }, [refresh]);
+    return () => {
+      active = false;
+      invalidateLoads();
+      unsubscribe();
+    };
+  }, [refresh, invalidateLoads]);
+
+  useEffect(() => {
+    let active = true;
+    fetch('/api/configuracoes/publicas')
+      .then((response) => response.json())
+      .then((data) => {
+        if (active) setExceptions(data.exceptions ?? []);
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  function selectDate(date: string) {
+    setTargetId('');
+    setSearch('');
+    setDateFilter(date);
+  }
+
+  function applyStatus(id: string, status: string) {
+    setReservations((current) => {
+      const next = current.map((item) =>
+        item.id === id ? { ...item, status } : item,
+      );
+      if (!targetId && dateFilter === brazilDate())
+        writeStaffCache('reservations', next);
+      return next;
+    });
+    setSuccess(
+      status === 'confirmed'
+        ? 'Reserva aprovada. Comunicação gerada para o cliente.'
+        : 'Solicitação recusada. Motivo registrado e lugares liberados.',
+    );
+  }
+
+  async function loadMore() {
+    if (!currentUser || !nextCursor || loadingMore) return;
+    const version = loadVersion.current;
+    setLoadingMore(true);
+    try {
+      const data = await loadReservations(currentUser, dateFilter, nextCursor);
+      if (version !== loadVersion.current) return;
+      setReservations((current) => [
+        ...current,
+        ...data.reservations.filter(
+          (item) => !current.some((existing) => existing.id === item.id),
+        ),
+      ]);
+      setNextCursor(data.nextCursor);
+    } catch (caught) {
+      if (version === loadVersion.current)
+        setError(
+          caught instanceof Error
+            ? caught.message
+            : 'Não foi possível carregar mais reservas.',
+        );
+    } finally {
+      setLoadingMore(false);
+    }
+  }
 
   async function retryLiveData() {
     if (!currentUser) return;
@@ -223,22 +302,45 @@ export default function ReservationsPage() {
           (reservation.reservationCode ?? '').toLowerCase().includes(term) ||
           reservation.id.toLowerCase().includes(term);
         const matchesDate =
-          !dateFilter || reservation.serviceDate === dateFilter;
+          targetId || !dateFilter || reservation.serviceDate === dateFilter;
         const matchesService =
           serviceFilter === 'todos' || reservation.service === serviceFilter;
-        return matchesSearch && matchesDate && matchesService;
+        const matchesStatus =
+          statusFilter === 'todos' ||
+          (statusFilter === 'sem_mesa'
+            ? !reservation.tableLabel &&
+              ['pending_approval', 'confirmed', 'presence_confirmed'].includes(
+                reservation.status,
+              )
+            : reservation.status === statusFilter);
+        return matchesSearch && matchesDate && matchesService && matchesStatus;
       })
       .sort(
         (a, b) =>
           a.serviceDate.localeCompare(b.serviceDate) ||
           a.arrivalTime.localeCompare(b.arrivalTime),
       );
-  }, [dateFilter, reservations, search, serviceFilter]);
+  }, [dateFilter, reservations, search, serviceFilter, statusFilter, targetId]);
 
-  function startEditing(reservation: Reservation) {
-    setEditingReservation({ ...reservation });
+  async function startEditing(reservation: Reservation) {
+    if (!currentUser || saving) return;
     setError('');
     setSuccess('');
+    setSaving(true);
+    try {
+      const data = await loadReservations(currentUser, '', '', reservation.id);
+      if (!data.reservations[0])
+        throw new Error('Esta reserva já foi removida. Atualize a lista.');
+      setEditingReservation(data.reservations[0]);
+    } catch (caught) {
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : 'Não foi possível abrir a reserva.',
+      );
+    } finally {
+      setSaving(false);
+    }
   }
 
   function updateDraft<Key extends keyof Reservation>(
@@ -426,14 +528,18 @@ export default function ReservationsPage() {
         <CardHeader className="gap-4 border-b border-black/7 lg:flex-row lg:items-center lg:justify-between">
           <div>
             <CardTitle className="text-xl font-bold">
-              {dateFilter ? 'Reservas do dia' : 'Todas as reservas'}
+              {targetId
+                ? 'Reserva selecionada'
+                : dateFilter
+                  ? 'Reservas do dia'
+                  : 'Histórico de reservas'}
             </CardTitle>
             <p className="mt-1 text-sm text-black/65">
               Use os filtros ou escolha outra data para localizar um
               atendimento.
             </p>
           </div>
-          <div className="grid gap-2 sm:grid-cols-3">
+          <div className="grid gap-2 sm:grid-cols-2">
             <div className="relative">
               <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-black/55" />
               <Input
@@ -451,7 +557,9 @@ export default function ReservationsPage() {
                 type="date"
                 value={dateFilter}
                 disabled={Boolean(offlineSavedAt)}
-                onChange={(event) => setDateFilter(event.target.value)}
+                onChange={(event) =>
+                  selectDate(event.target.value || brazilDate())
+                }
                 className="pl-9"
               />
             </div>
@@ -467,6 +575,40 @@ export default function ReservationsPage() {
               <NativeSelectOption value="almoco">Almoço</NativeSelectOption>
               <NativeSelectOption value="rodizio">Rodízio</NativeSelectOption>
             </NativeSelect>
+            <NativeSelect
+              aria-label="Filtrar por situação"
+              value={statusFilter}
+              onChange={(event) => setStatusFilter(event.target.value)}
+              className="w-full"
+            >
+              <NativeSelectOption value="todos">
+                Todas as situações
+              </NativeSelectOption>
+              <NativeSelectOption value="pending_approval">
+                Aguardando aprovação
+              </NativeSelectOption>
+              <NativeSelectOption value="sem_mesa">
+                Ainda sem mesa
+              </NativeSelectOption>
+              <NativeSelectOption value="confirmed">
+                Confirmadas
+              </NativeSelectOption>
+              <NativeSelectOption value="presence_confirmed">
+                Presença confirmada
+              </NativeSelectOption>
+              <NativeSelectOption value="seated">
+                Clientes que chegaram
+              </NativeSelectOption>
+              <NativeSelectOption value="cancelled">
+                Canceladas
+              </NativeSelectOption>
+              <NativeSelectOption value="no_show">
+                Não compareceram
+              </NativeSelectOption>
+              <NativeSelectOption value="completed">
+                Concluídas
+              </NativeSelectOption>
+            </NativeSelect>
           </div>
         </CardHeader>
         <CardContent className="min-w-0">
@@ -475,7 +617,7 @@ export default function ReservationsPage() {
               variant="outline"
               size="sm"
               onClick={() =>
-                setDateFilter(
+                selectDate(
                   new Intl.DateTimeFormat('en-CA', {
                     timeZone: 'America/Sao_Paulo',
                   }).format(new Date()),
@@ -488,11 +630,26 @@ export default function ReservationsPage() {
               variant="outline"
               size="sm"
               disabled={Boolean(offlineSavedAt)}
-              onClick={() => setDateFilter('')}
+              onClick={() => selectDate('')}
             >
-              Todas as datas
+              Consultar histórico
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={loading}
+              onClick={() => void retryLiveData()}
+            >
+              Atualizar lista
             </Button>
           </div>
+          {!dateFilter && (
+            <p className="mb-4 text-sm text-stone-700">
+              Histórico carregado em grupos de 50. A busca e os totais
+              consideram os registros carregados; escolha uma data para
+              consultar um dia específico.
+            </p>
+          )}
           {loading ? (
             <p className="flex items-center justify-center gap-2 py-12 text-sm text-black/65">
               <LoaderCircle className="size-4 animate-spin" /> Carregando
@@ -507,6 +664,18 @@ export default function ReservationsPage() {
           {!loading && filteredReservations.length > 0 ? (
             <ReservationCards
               items={filteredReservations}
+              readOnly={Boolean(offlineSavedAt)}
+              onTableChange={(id, tableLabel) => {
+                setReservations((current) => {
+                  const next = current.map((item) =>
+                    item.id === id ? { ...item, tableLabel } : item,
+                  );
+                  if (!targetId && dateFilter === brazilDate())
+                    writeStaffCache('reservations', next);
+                  return next;
+                });
+              }}
+              onStatusChange={offlineSavedAt ? undefined : applyStatus}
               actions={(item) => {
                 const reservation = filteredReservations.find(
                   (r) => r.id === item.id,
@@ -516,8 +685,8 @@ export default function ReservationsPage() {
                     <Button
                       variant="outline"
                       size="sm"
-                      disabled={Boolean(offlineSavedAt)}
-                      onClick={() => startEditing(reservation)}
+                      disabled={saving || Boolean(offlineSavedAt)}
+                      onClick={() => void startEditing(reservation)}
                     >
                       <Pencil /> Editar
                     </Button>
@@ -551,6 +720,16 @@ export default function ReservationsPage() {
               }}
             />
           ) : null}
+          {nextCursor && !loading && (
+            <Button
+              variant="outline"
+              className="mt-5 min-h-11 w-full"
+              disabled={loadingMore || Boolean(offlineSavedAt)}
+              onClick={() => void loadMore()}
+            >
+              {loadingMore ? 'Carregando…' : 'Carregar mais reservas'}
+            </Button>
+          )}
         </CardContent>
       </Card>
 

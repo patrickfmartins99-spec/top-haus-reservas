@@ -187,10 +187,18 @@ export default function DashboardPage() {
       ),
     [queue],
   );
-  const reservedPeople = todayReservations.reduce(
-    (sum, reservation) => sum + reservation.partySize,
-    0,
-  );
+  const reservedPeople = reservations
+    .filter(
+      (item) =>
+        item.serviceDate === localDate() &&
+        [
+          'pending_approval',
+          'confirmed',
+          'presence_confirmed',
+          'seated',
+        ].includes(item.status),
+    )
+    .reduce((sum, reservation) => sum + reservation.partySize, 0);
   const pendingReservations = todayReservations.filter(
     (reservation) => reservation.status === 'pending_approval',
   );
@@ -221,7 +229,9 @@ export default function DashboardPage() {
       if (!response.ok)
         throw new Error(data.error ?? 'Não foi possível atualizar a reserva.');
       setReservations((current) => {
-        const next = current.filter((item) => item.id !== reservation.id);
+        const next = current.map((item) =>
+          item.id === reservation.id ? { ...item, status } : item,
+        );
         writeStaffCache('reservations', next);
         return next;
       });
@@ -331,31 +341,66 @@ export default function DashboardPage() {
             {!loading && todayReservations.length > 0 ? (
               <ReservationCards
                 items={todayReservations}
+                readOnly={Boolean(offlineSavedAt)}
+                onTableChange={(id, tableLabel) => {
+                  setReservations((current) => {
+                    const next = current.map((item) =>
+                      item.id === id ? { ...item, tableLabel } : item,
+                    );
+                    writeStaffCache('reservations', next);
+                    return next;
+                  });
+                }}
+                onStatusChange={
+                  offlineSavedAt
+                    ? undefined
+                    : (id, status) => {
+                        setReservations((current) => {
+                          const next = current.map((item) =>
+                            item.id === id ? { ...item, status } : item,
+                          );
+                          writeStaffCache('reservations', next);
+                          return next;
+                        });
+                        setSuccess(
+                          status === 'confirmed'
+                            ? 'Reserva aprovada e comunicação gerada.'
+                            : 'Solicitação recusada e motivo registrado.',
+                        );
+                      }
+                }
                 actions={(item) => {
                   const reservation = todayReservations.find(
                     (current) => current.id === item.id,
                   )!;
                   return (
                     <>
-                      <Button
-                        disabled={actionBusy || Boolean(offlineSavedAt)}
-                        size="sm"
-                        className="bg-black text-white hover:bg-black/85"
-                        onClick={() =>
-                          void updateReservationStatus(reservation, 'seated')
-                        }
-                      >
-                        <CheckCircle2 /> Confirmar chegada
-                      </Button>
-                      <Button
-                        disabled={actionBusy || Boolean(offlineSavedAt)}
-                        variant="outline"
-                        size="sm"
-                        className="border-red-200 text-red-700 hover:bg-red-50 hover:text-red-800"
-                        onClick={() => setNoShowReservation(reservation)}
-                      >
-                        <UserRoundX /> No show
-                      </Button>
+                      {item.status !== 'pending_approval' && (
+                        <>
+                          <Button
+                            disabled={actionBusy || Boolean(offlineSavedAt)}
+                            size="sm"
+                            className="bg-black text-white hover:bg-black/85"
+                            onClick={() =>
+                              void updateReservationStatus(
+                                reservation,
+                                'seated',
+                              )
+                            }
+                          >
+                            <CheckCircle2 /> Confirmar chegada
+                          </Button>
+                          <Button
+                            disabled={actionBusy || Boolean(offlineSavedAt)}
+                            variant="outline"
+                            size="sm"
+                            className="border-red-200 text-red-700 hover:bg-red-50 hover:text-red-800"
+                            onClick={() => setNoShowReservation(reservation)}
+                          >
+                            <UserRoundX /> No show
+                          </Button>
+                        </>
+                      )}
                       <Link
                         href={'/painel/reservas?busca=' + item.id}
                         className={buttonVariants({

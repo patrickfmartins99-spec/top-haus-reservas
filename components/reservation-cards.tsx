@@ -1,6 +1,7 @@
 'use client';
 import type { ReactNode } from 'react';
 import { ReservationTable } from '@/components/reservation-table';
+import { ReservationApproval } from '@/components/reservation-approval';
 type Item = {
   id: string;
   reservationCode?: string;
@@ -26,9 +27,15 @@ const labels: Record<string, string> = {
 export function ReservationCards({
   items,
   actions,
+  onStatusChange,
+  onTableChange,
+  readOnly = false,
 }: {
   items: Item[];
   actions?: (item: Item) => ReactNode;
+  onStatusChange?: (id: string, status: string) => void;
+  onTableChange?: (id: string, tableLabel: string) => void;
+  readOnly?: boolean;
 }) {
   return (
     <div className="grid min-w-0 gap-4 lg:grid-cols-2">
@@ -69,6 +76,13 @@ export function ReservationCards({
               {labels[r.status] ?? r.status}
             </span>
           </div>
+          {r.status === 'pending_approval' && onStatusChange && (
+            <ReservationApproval
+              id={r.id}
+              customerName={r.customerName}
+              onChanged={onStatusChange}
+            />
+          )}
           {r.whatsapp && (
             <p className="break-all text-sm text-black/80">
               <strong>WhatsApp:</strong> {r.whatsapp}
@@ -82,6 +96,8 @@ export function ReservationCards({
               id={r.id}
               initialValue={r.tableLabel}
               customerName={r.customerName}
+              disabled={readOnly || ['cancelled', 'no_show', 'completed'].includes(r.status)}
+              onSaved={(tableLabel) => onTableChange?.(r.id, tableLabel)}
             />
           </div>
           {r.notes && (

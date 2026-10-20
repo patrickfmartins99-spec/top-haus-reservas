@@ -248,11 +248,11 @@ export default function Home() {
               Sua mesa está esperando
             </p>
             <h1 className="font-heading text-4xl font-extrabold leading-[1.04] tracking-[-0.035em] sm:text-5xl lg:text-6xl">
-              Sua mesa no Top Haus, sem complicação.
+              Bons momentos começam à mesa.
             </h1>
             <p className="mt-6 max-w-lg text-base leading-7 text-white/85 sm:text-lg">
-              Escolha o almoço ou o rodízio, informe o tamanho do grupo e
-              encontre o melhor horário para sua visita.
+              Escolha o melhor horário e venha desfrutar de bons momentos aqui
+              na Top Haus!
             </p>
             <div className="mt-8 flex flex-wrap gap-x-6 gap-y-3 text-sm text-white/90">
               <span className="flex items-center gap-2">

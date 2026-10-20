@@ -14,7 +14,7 @@ import {
   NativeSelectOption,
 } from '@/components/ui/native-select';
 import { Textarea } from '@/components/ui/textarea';
-import { minimumBookingDate, brazilDate } from '@/lib/domain/reservations';
+import { brazilDate } from '@/lib/domain/reservations';
 import { DEFAULT_OPERATIONAL_SETTINGS } from '@/lib/domain/operational-settings';
 import type { SpecialDateException } from '@/lib/domain/special-dates';
 import { getFirebaseClient } from '@/lib/firebase/client';
@@ -72,11 +72,11 @@ export default function NewReservationPage() {
           ? 'Este serviço está fechado nesta segunda-feira.'
           : '';
   const { minDate, maxDate } = useMemo(() => {
-    const minimum = minimumBookingDate(service, settings.minAdvanceHours);
+    const minimum = brazilDate();
     const maximum = new Date();
     maximum.setMonth(maximum.getMonth() + settings.maxBookingMonths);
     return { minDate: minimum, maxDate: brazilDate(maximum) };
-  }, [service, settings]);
+  }, [settings]);
 
   function changeService(nextService: Service) {
     setService(nextService);
@@ -133,7 +133,7 @@ export default function NewReservationPage() {
       if (!response.ok)
         throw new Error(data.error ?? 'Não foi possível criar a reserva.');
       router.push(
-        `/painel/reservas?criada=${encodeURIComponent(data.reservationCode)}`,
+        `/painel/reservas?data=${serviceDate}&criada=${encodeURIComponent(data.reservationCode)}`,
       );
     } catch (caughtError) {
       setError(
@@ -174,16 +174,16 @@ export default function NewReservationPage() {
         </p>
       ) : null}
       <p className="rounded-xl bg-white p-4 text-sm font-semibold">
-        Rodízio: reservas até as 18h do dia da visita. Almoço:{' '}
-        {settings.minAdvanceHours} horas de antecedência. Horário de Brasília.
+        A equipe pode cadastrar reservas fora do prazo online e acima da cota de
+        lugares. Confira o espaço disponível antes de salvar. As exceções ficam
+        registradas no histórico com o responsável.
       </p>
       <form onSubmit={createReservation}>
         <Card className="bg-white ring-black/7">
           <CardHeader className="border-b border-black/7">
             <CardTitle>Dados do cliente</CardTitle>
             <p className="text-sm text-black/50">
-              A reserva será salva no Firebase e ficará disponível para toda a
-              equipe.
+              Preencha os dados para compartilhar a reserva com toda a equipe.
             </p>
           </CardHeader>
           <CardContent className="grid gap-5 sm:grid-cols-2">
@@ -277,9 +277,9 @@ export default function NewReservationPage() {
               />
             </div>
             <div className="rounded-xl border border-haus-gold/35 bg-[#f4e7d7] px-4 py-3 text-sm text-black/65 sm:col-span-2">
-              <strong>Confirmação:</strong> até 20 pessoas a reserva será
-              confirmada automaticamente. Grupos maiores ficarão aguardando
-              aprovação.
+              <strong>Confirmação:</strong> até {settings.autoApprovalLimit}{' '}
+              pessoas a reserva será confirmada automaticamente. Grupos maiores
+              ficarão aguardando aprovação.
             </div>
             {selectedException?.customerNotice || unavailableReason ? (
               <p

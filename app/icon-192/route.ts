@@ -2,6 +2,8 @@ import { ImageResponse } from 'next/og';
 import { createElement } from 'react';
 import { AppIconArtwork } from '@/components/app-icon-artwork';
 
+export const dynamic = 'force-static';
+
 export function GET() {
   return new ImageResponse(createElement(AppIconArtwork, { size: 192 }), {
     width: 192,
