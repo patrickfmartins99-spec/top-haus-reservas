@@ -8,6 +8,7 @@ import * as reservations from '../lib/domain/reservations.ts';
 import * as policy from '../lib/domain/booking-policy.ts';
 import * as outcomes from '../lib/domain/service-outcomes.ts';
 import * as codes from '../lib/domain/reservation-code.ts';
+import * as waitlistTime from '../lib/domain/waitlist-time.ts';
 
 // Isolated route integration tests: never initialize Firebase or send a message.
 function harness(initial = {}) {
@@ -128,6 +129,7 @@ function harness(initial = {}) {
     '@/lib/domain/booking-policy': policy,
     '@/lib/domain/service-outcomes': outcomes,
     '@/lib/domain/reservation-code': codes,
+    '@/lib/domain/waitlist-time': waitlistTime,
     '@/lib/domain/operational-settings': {
       getOperationalSettings: async () => settings,
     },
@@ -183,6 +185,7 @@ function harness(initial = {}) {
   const pending = route('../app/api/reservas/[id]/route.ts');
   const create = route('../app/api/reservas/route.ts');
   const waitlist = route('../app/api/fila/route.ts');
+  const waitlistUpdate = route('../app/api/fila/[id]/route.ts');
   function request(body, staff = true) {
     return new Request('https://test.invalid/api/reservas', {
       method: 'POST',
@@ -198,6 +201,10 @@ function harness(initial = {}) {
     reads,
     events,
     settings,
+    updateQueue: (body, staff = true) =>
+      waitlistUpdate.PATCH(request(body, staff), {
+        params: Promise.resolve({ id: 'q1' }),
+      }),
     queue: (parameters = '', staff = true) =>
       waitlist.GET(
         new Request(`https://test.invalid/api/fila?${parameters}`, {
@@ -227,6 +234,99 @@ const sample = {
   customerName: 'Teste local',
   whatsapp: '51900000000',
 };
+
+const queueSample = {
+  customerName: 'Cliente teste',
+  whatsapp: '51900000000',
+  partySize: 3,
+  status: 'waiting',
+  revision: 0,
+};
+
+test('concurrent calls create one message and keep the original call timestamp', async () => {
+  const h = harness({ 'waitlist/q1': queueSample });
+  const results = await Promise.all([
+    h.updateQueue({ status: 'called', expectedRevision: 0 }),
+    h.updateQueue({ status: 'called', expectedRevision: 0 }),
+  ]);
+  assert.deepEqual(
+    results.map((r) => r.status),
+    [200, 200],
+  );
+  assert.equal(h.events.length, 1);
+  assert.equal(
+    [...h.records.keys()].filter((k) => k.startsWith('whatsappQueue/')).length,
+    1,
+  );
+  assert.equal(h.records.get('waitlist/q1').revision, 1);
+  assert.equal(h.events[0].eventType, 'waitlist_called');
+  assert.deepEqual(h.reads, ['waitlist/q1', 'waitlist/q1']);
+});
+
+test('arrival and removal cannot both close the same queue entry', async () => {
+  const h = harness({ 'waitlist/q1': { ...queueSample, status: 'called' } });
+  const results = await Promise.all([
+    h.updateQueue({ status: 'seated', expectedRevision: 0 }),
+    h.updateQueue({
+      status: 'removed',
+      reason: 'customer_gave_up',
+      expectedRevision: 0,
+    }),
+  ]);
+  assert.deepEqual(
+    results.map((r) => r.status),
+    [200, 409],
+  );
+  assert.equal(h.events.length, 1);
+  assert.equal(h.records.get('waitlist/q1').status, 'seated');
+  assert.ok(h.records.get('waitlist/q1').endedAt);
+});
+
+test('queue rejects stale edits, changes to closed entries and invalid transitions', async () => {
+  const h = harness({ 'waitlist/q1': queueSample });
+  assert.equal(
+    (
+      await h.updateQueue({
+        ...queueSample,
+        status: undefined,
+        customerName: 'Novo nome',
+        expectedRevision: 0,
+      })
+    ).status,
+    200,
+  );
+  assert.equal(
+    (
+      await h.updateQueue({
+        ...queueSample,
+        status: undefined,
+        partySize: 8,
+        expectedRevision: 0,
+      })
+    ).status,
+    409,
+  );
+  assert.equal(h.records.get('waitlist/q1').customerName, 'Novo nome');
+  assert.equal(h.records.get('waitlist/q1').partySize, 3);
+  assert.equal((await h.updateQueue({ status: 'seated' })).status, 409);
+  assert.equal(
+    (await h.updateQueue({ status: 'no_show', reason: 'did_not_return' }))
+      .status,
+    409,
+  );
+  assert.equal((await h.updateQueue({ status: 'called' }, false)).status, 403);
+  h.records.set('waitlist/q1', { ...queueSample, status: 'removed' });
+  assert.equal(
+    (
+      await h.updateQueue({
+        ...queueSample,
+        status: undefined,
+        customerName: 'Não deve mudar',
+      })
+    ).status,
+    409,
+  );
+});
 
 test('waitlist event lookup reads one record and rejects unauthenticated or invalid paths', async () => {
   const h = harness({

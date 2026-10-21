@@ -53,7 +53,8 @@ import {
   publishStaffEvent,
 } from '@/lib/client/staff-events';
 import {
-  clearStaffCache,
+  clearAllStaffCache,
+  isAccessDenied,
   readStaffCache,
   writeStaffCache,
 } from '@/lib/offline/staff-cache';
@@ -107,7 +108,8 @@ export function StaffShell({ children }: { children: ReactNode }) {
       headers: { Authorization: 'Bearer ' + (await user.getIdToken()) },
     });
     const data = await response.json();
-    if (!response.ok) throw new Error(data.error);
+    if (!response.ok)
+      throw Object.assign(new Error(data.error), { status: response.status });
     setProfile(data.profile);
     setDisplayName(data.profile.displayName);
     setOfflineSession(false);
@@ -147,7 +149,17 @@ export function StaffShell({ children }: { children: ReactNode }) {
       }
       try {
         await refreshProfile();
-      } catch {
+      } catch (error) {
+        if (isAccessDenied(error)) {
+          clearAllStaffCache();
+          setProfile(null);
+          setOfflineSession(false);
+          setSessionError(
+            'Seu acesso precisa ser validado novamente. Entre com seu usuário ou procure o administrador.',
+          );
+          setCheckingSession(false);
+          return;
+        }
         const cached = readStaffCache<StaffProfile>('profile');
         if (cached?.value.uid === user.uid) {
           setProfile(cached.value);
@@ -270,7 +282,7 @@ export function StaffShell({ children }: { children: ReactNode }) {
     } catch {
       /* Sign-out must remain available if the push service is offline. */
     }
-    clearStaffCache('profile');
+    clearAllStaffCache();
     await signOut(firebase.auth);
     router.replace('/entrar');
   }

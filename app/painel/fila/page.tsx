@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { onAuthStateChanged, type User } from 'firebase/auth';
 import {
   Check,
@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 
 import { ReasonDialog } from '@/components/reason-dialog';
+import { WaitlistCallCountdown } from '@/components/waitlist-call-countdown';
 import { OfflineModeBanner } from '@/components/offline-mode-banner';
 import { Badge } from '@/components/ui/badge';
 import { Button, buttonVariants } from '@/components/ui/button';
@@ -58,6 +59,7 @@ type QueueEntry = {
   whatsapp: string;
   partySize: number;
   status: QueueStatus;
+  revision?: number;
   enteredAt: string | null;
   calledAt: string | null;
 };
@@ -95,6 +97,7 @@ export default function WaitlistPage() {
   const [queue, setQueue] = useState<QueueEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const mutationInFlight = useRef(false);
   const [offlineSavedAt, setOfflineSavedAt] = useState<string | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingEntry, setEditingEntry] = useState<QueueEntry | null>(null);
@@ -149,6 +152,31 @@ export default function WaitlistPage() {
     setOfflineSavedAt(null);
     writeStaffCache('waitlist', data.entries);
   }, []);
+
+  async function refreshEntry(id: string) {
+    if (!currentUser) return;
+    const response = await staffRequest(
+      currentUser,
+      `/api/fila?id=${encodeURIComponent(id)}`,
+    );
+    const data = await response.json();
+    if (!response.ok)
+      throw new Error(
+        'A alteração pode ter sido salva, mas a conferência falhou. Atualize a fila antes de repetir a ação.',
+      );
+    setQueue((current) => {
+      const next = mergeStaffEntity(
+        current,
+        id,
+        data.entries[0] as QueueEntry | undefined,
+        (item) => ['waiting', 'called'].includes(item.status),
+      ).sort((a, b) =>
+        String(a.enteredAt ?? '').localeCompare(String(b.enteredAt ?? '')),
+      );
+      writeStaffCache('waitlist', next);
+      return next;
+    });
+  }
 
   useEffect(() => {
     const firebase = getFirebaseClient();
@@ -231,7 +259,8 @@ export default function WaitlistPage() {
 
   async function saveEntry(event: React.SyntheticEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!currentUser) return;
+    if (!currentUser || mutationInFlight.current) return;
+    mutationInFlight.current = true;
     setSaving(true);
     setError('');
     setSuccess('');
@@ -245,13 +274,20 @@ export default function WaitlistPage() {
             customerName,
             whatsapp,
             partySize: Number(partySize),
+            ...(editingEntry
+              ? { expectedRevision: editingEntry.revision ?? 0 }
+              : {}),
           }),
         },
       );
       const data = await response.json();
-      if (!response.ok)
+      if (!response.ok) {
+        if (response.status === 409 && editingEntry)
+          await refreshEntry(editingEntry.id);
         throw new Error(data.error ?? 'Não foi possível salvar o cliente.');
+      }
       const edited = Boolean(editingEntry);
+      const savedId = editingEntry?.id ?? data.id;
       setCustomerName('');
       setWhatsapp('');
       setPartySize('2');
@@ -262,7 +298,7 @@ export default function WaitlistPage() {
           ? 'Dados do cliente atualizados com sucesso.'
           : 'Cliente adicionado à fila. Confira o texto de boas-vindas na aba Mensagens.',
       );
-      await loadQueue(currentUser);
+      await refreshEntry(savedId);
     } catch (caughtError) {
       setError(
         caughtError instanceof Error
@@ -270,6 +306,7 @@ export default function WaitlistPage() {
           : 'Não foi possível salvar o cliente.',
       );
     } finally {
+      mutationInFlight.current = false;
       setSaving(false);
     }
   }
@@ -292,7 +329,8 @@ export default function WaitlistPage() {
     reason = '',
     note = '',
   ) {
-    if (!currentUser) return;
+    if (!currentUser || mutationInFlight.current) return;
+    mutationInFlight.current = true;
     setSaving(true);
     setError('');
     setSuccess('');
@@ -300,11 +338,24 @@ export default function WaitlistPage() {
       const response = await staffRequest(
         currentUser,
         `/api/fila/${entry.id}`,
-        { method: 'PATCH', body: JSON.stringify({ status, reason, note }) },
+        {
+          method: 'PATCH',
+          body: JSON.stringify({
+            status,
+            reason,
+            note,
+            expectedRevision: entry.revision ?? 0,
+          }),
+        },
       );
       const data = await response.json();
-      if (!response.ok)
+      if (!response.ok) {
+        if (response.status === 409) {
+          setExitAction(null);
+          await refreshEntry(entry.id);
+        }
         throw new Error(data.error ?? 'Não foi possível atualizar a fila.');
+      }
       setExitAction(null);
       setSuccess(
         status === 'called'
@@ -315,7 +366,7 @@ export default function WaitlistPage() {
               ? `${entry.customerName} foi registrado como no show.`
               : `${entry.customerName} saiu da fila. Motivo registrado no relatório.`,
       );
-      await loadQueue(currentUser);
+      await refreshEntry(entry.id);
     } catch (caughtError) {
       setError(
         caughtError instanceof Error
@@ -323,6 +374,7 @@ export default function WaitlistPage() {
           : 'Não foi possível atualizar a fila.',
       );
     } finally {
+      mutationInFlight.current = false;
       setSaving(false);
     }
   }
@@ -471,6 +523,7 @@ export default function WaitlistPage() {
                       ? `Aguardou ${waitTime}${calledTime === null ? '' : ` · chamado há ${formatDurationClock(calledTime)}`}`
                       : `Aguardando há ${waitTime}`}
                   </p>
+                  <WaitlistCallCountdown entry={entry} now={now} />
                 </div>
                 <div className="flex w-full flex-wrap gap-2 sm:w-auto [&>*]:min-w-[7.5rem] [&>*]:flex-1 sm:[&>*]:flex-none">
                   <Button

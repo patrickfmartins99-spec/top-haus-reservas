@@ -26,11 +26,20 @@ export function calledDurationMilliseconds(entry: WaitlistTiming, now: number) {
   return Math.max(0, now - calledAt);
 }
 
+export function callHoldState(entry: WaitlistTiming, now: number) {
+  const elapsed = calledDurationMilliseconds(entry, now);
+  if (elapsed === null) return null;
+  const remaining = Math.max(0, WAITLIST_CALL_HOLD_MINUTES * 60_000 - elapsed);
+  return { remaining, expired: remaining === 0 };
+}
+
 export function formatDurationClock(milliseconds: number | null) {
   if (milliseconds === null) return '00:00:00';
   const totalSeconds = Math.floor(milliseconds / 1000);
   const hours = Math.floor(totalSeconds / 3600);
   const minutes = Math.floor((totalSeconds % 3600) / 60);
   const seconds = totalSeconds % 60;
-  return [hours, minutes, seconds].map((value) => String(value).padStart(2, '0')).join(':');
+  return [hours, minutes, seconds]
+    .map((value) => String(value).padStart(2, '0'))
+    .join(':');
 }

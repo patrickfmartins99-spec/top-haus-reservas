@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 
 import { ReasonDialog } from '@/components/reason-dialog';
+import { WaitlistCallCountdown } from '@/components/waitlist-call-countdown';
 import { OfflineModeBanner } from '@/components/offline-mode-banner';
 import { ReservationCards } from '@/components/reservation-cards';
 import { Badge } from '@/components/ui/badge';
@@ -135,22 +136,32 @@ export default function DashboardPage() {
     const token = await user.getIdToken();
     const headers = { Authorization: `Bearer ${token}` };
     const today = localDate();
-    const [reservationsResponse, queueResponse] = await Promise.all([
-      fetchWithTimeout(`/api/reservas?data=${today}`, { headers }),
-      fetchWithTimeout('/api/fila?ativas=1', { headers }),
+    const results = await Promise.allSettled([
+      (async () => {
+        const response = await fetchWithTimeout(`/api/reservas?data=${today}`, {
+          headers,
+        });
+        const data = await response.json();
+        if (!response.ok)
+          throw new Error(
+            data.error ?? 'Não foi possível carregar as reservas.',
+          );
+        setReservations(data.reservations);
+        writeStaffCache('reservations', data.reservations);
+      })(),
+      (async () => {
+        const response = await fetchWithTimeout('/api/fila?ativas=1', {
+          headers,
+        });
+        const data = await response.json();
+        if (!response.ok)
+          throw new Error(data.error ?? 'Não foi possível carregar a fila.');
+        setQueue(data.entries);
+        writeStaffCache('waitlist', data.entries);
+      })(),
     ]);
-    const reservationsData = await reservationsResponse.json();
-    const queueData = await queueResponse.json();
-    if (!reservationsResponse.ok)
-      throw new Error(
-        reservationsData.error ?? 'Não foi possível carregar as reservas.',
-      );
-    if (!queueResponse.ok)
-      throw new Error(queueData.error ?? 'Não foi possível carregar a fila.');
-    setReservations(reservationsData.reservations);
-    setQueue(queueData.entries);
-    writeStaffCache('reservations', reservationsData.reservations);
-    writeStaffCache('waitlist', queueData.entries);
+    const failure = results.find((result) => result.status === 'rejected');
+    if (failure?.status === 'rejected') throw failure.reason;
     setOfflineSavedAt(null);
   }, []);
 
@@ -166,13 +177,18 @@ export default function DashboardPage() {
         ? cachedQueue
         : null;
     if (!validReservations && !validQueue) return false;
+    if (!validReservations || !validQueue) {
+      setError(
+        `Sem cópia disponível de ${!validReservations ? 'reservas' : 'fila de espera'} neste aparelho. A ausência de itens nessa área não significa que ela esteja vazia.`,
+      );
+    }
     setReservations(validReservations?.value ?? []);
     setQueue(validQueue?.value ?? []);
     setOfflineSavedAt(
       [validReservations?.savedAt, validQueue?.savedAt]
         .filter((value): value is string => Boolean(value))
         .sort()
-        .at(-1) ?? new Date().toISOString(),
+        .at(0) ?? new Date().toISOString(),
     );
     return true;
   }, []);
@@ -525,6 +541,7 @@ export default function DashboardPage() {
                       )}
                     </span>
                   </p>
+                  <WaitlistCallCountdown entry={entry} now={now} />
                 </div>
               </article>
             ))}

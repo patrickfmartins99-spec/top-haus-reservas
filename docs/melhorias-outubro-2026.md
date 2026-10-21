@@ -46,10 +46,28 @@ Há uma leitura do registro alterado por tela ativa interessada (mais autentica�
 
 Testes isolados cobrem ausência de leitura sem evento, agrupamento, segundo plano, mudanças concorrentes, desmontagem da tela, falha sem loop, consulta pontual protegida, ausência de duplicidade e uma leitura de chave por lote. Não enviam mensagens reais. Robô, regras do Firebase e dados operacionais não foram alterados.
 
+## Pacote 2B: fila e contingência de consulta
+
+- Chamar, confirmar chegada e registrar saída agora usam uma transação: duas decisões concorrentes não encerram o mesmo atendimento de formas diferentes. Repetir a mesma chamada não reinicia o prazo nem gera outra mensagem.
+- Edições com versão antiga são recusadas com orientação para conferir os dados atuais. Atendimentos encerrados não podem ser reabertos ou editados pela rota da fila.
+- Contagem regressiva de três minutos nos cards da fila e da visão geral, com alerta visual ao terminar. O prazo começa na chamada no painel, não na entrega do WhatsApp. A equipe continua decidindo e registrando o motivo da saída; não há remoção automática.
+- Depois de uma ação, a fila confere somente o cliente afetado, em vez de recarregar a lista inteira. Proteção local contra toque duplo; criação ainda não tem chave de idempotência para repetição após resposta perdida.
+- Visão geral preserva cada carregamento bem-sucedido independentemente: falha nas reservas não descarta a fila recebida. Contingência informa quando não existe cópia de uma das áreas e apresenta o horário mais antigo entre as cópias.
+- Cópias locais são limpas ao sair, trocar de usuário ou receber recusa explícita de acesso. Falha temporária de rede continua permitindo a sessão anteriormente validada, quando disponível. Cópias operacionais vencem em 18 horas e precisam pertencer ao dia atual nas telas operacionais.
+- Navegador sem conexão identificada falha rapidamente, sem aguardar todo o prazo da requisição e sem enfileirar alterações offline.
+
+### Validação e limites do pacote 2B
+
+69 testes automatizados, incluindo chamadas simultâneas, encerramentos conflitantes, edição desatualizada, autenticação, limite de três minutos e limpeza/validade das cópias locais. Firebase simulado: nenhum teste cria cliente ou dispara mensagem em produção.
+
+Não foi adicionado listener nem consulta periódica. A contagem é local; cada alteração faz leitura transacional do atendimento, podendo haver releituras em caso de conflito, e conferência pontual após salvar. Autenticação, eventos e entrega existentes continuam consumindo recursos. O robô não foi alterado.
+
+Contingência não é funcionamento offline completo: exige sessão previamente validada, cópia no mesmo navegador/aparelho e tela disponível. Não permite login novo sem internet, escrita offline nem garante abertura a frio do aplicativo. Relógio incorreto do aparelho pode afetar o contador visual. Instalação, push e falha real de rede no celular ainda exigem validação em aparelho físico.
+
 ## Próximos grupos, ainda não entregues
 
 1. Revisão do status das mensagens e confirmação de entrega no aparelho físico; preservar heartbeat de 15 minutos do robô e evitar polling.
-2. Revisão da fila (contagem de 3 minutos, concorrência e feedback), contingência offline e revisão completa do restante da navegação móvel.
+2. Aprofundar contingência (abertura/navegação sem rede), recuperação de criação com resposta perdida e revisão completa do restante da navegação móvel.
 3. Consulta pública: reduzir busca por telefone, testar formatação de número e ambiguidades de código entre serviços. O formulário foi validado com resposta simulada; isso não comprova disponibilidade do banco de produção.
 
 Publicar em grupos após validação. Não enviar credenciais, contas de serviço, caches de sessão nem a compilação local com configuração fictícia ao repositório.

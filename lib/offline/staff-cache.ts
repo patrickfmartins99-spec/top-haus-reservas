@@ -21,6 +21,14 @@ function maxAge(area: StaffCacheArea) {
 
 export function writeStaffCache<T>(area: StaffCacheArea, value: T) {
   try {
+    if (area === 'profile') {
+      const previous = readStaffCache<{ uid: string }>('profile');
+      const nextUid = (value as { uid?: string })?.uid;
+      if (!previous || previous.value.uid !== nextUid) {
+        clearStaffCache('reservations');
+        clearStaffCache('waitlist');
+      }
+    }
     const envelope: CacheEnvelope<T> = {
       savedAt: new Date().toISOString(),
       value,
@@ -36,9 +44,19 @@ export function readStaffCache<T>(area: StaffCacheArea) {
     const parsed = JSON.parse(
       window.localStorage.getItem(cacheKey(area)) ?? 'null',
     ) as CacheEnvelope<T> | null;
-    if (!parsed || !parsed.savedAt || !('value' in parsed)) return null;
+    if (
+      !parsed ||
+      typeof parsed !== 'object' ||
+      !parsed.savedAt ||
+      !('value' in parsed)
+    )
+      return null;
     const savedAt = new Date(parsed.savedAt).getTime();
-    if (!Number.isFinite(savedAt) || Date.now() - savedAt > maxAge(area)) {
+    if (
+      !Number.isFinite(savedAt) ||
+      savedAt > Date.now() + 60_000 ||
+      Date.now() - savedAt > maxAge(area)
+    ) {
       window.localStorage.removeItem(cacheKey(area));
       return null;
     }
@@ -46,6 +64,26 @@ export function readStaffCache<T>(area: StaffCacheArea) {
   } catch {
     return null;
   }
+}
+
+export function clearAllStaffCache() {
+  clearStaffCache('profile');
+  clearStaffCache('reservations');
+  clearStaffCache('waitlist');
+}
+
+export function isAccessDenied(error: unknown) {
+  if (!error || typeof error !== 'object') return false;
+  const value = error as { status?: number; code?: string };
+  return (
+    value.status === 401 ||
+    value.status === 403 ||
+    [
+      'auth/user-disabled',
+      'auth/user-token-expired',
+      'auth/id-token-revoked',
+    ].includes(value.code ?? '')
+  );
 }
 
 export function clearStaffCache(area: StaffCacheArea) {
