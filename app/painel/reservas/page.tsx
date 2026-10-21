@@ -118,6 +118,7 @@ export default function ReservationsPage() {
     searchParams.get('data') ?? brazilDate(),
   );
   const [statusFilter, setStatusFilter] = useState('todos');
+  const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
   const loadVersion = useRef(0);
@@ -463,6 +464,20 @@ export default function ReservationsPage() {
     }
   }
 
+  const reservedPeople = filteredReservations
+    .filter((item) =>
+      [
+        'pending_approval',
+        'confirmed',
+        'presence_confirmed',
+        'seated',
+      ].includes(item.status),
+    )
+    .reduce((sum, item) => sum + item.partySize, 0);
+  const pendingCount = filteredReservations.filter(
+    (item) => item.status === 'pending_approval',
+  ).length;
+
   return (
     <div className="mx-auto max-w-[1500px] space-y-6 p-4 sm:p-6 lg:p-8">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
@@ -526,9 +541,20 @@ export default function ReservationsPage() {
         </p>
       ) : null}
 
-      <div className="grid gap-3 sm:grid-cols-3">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border border-black/10 bg-white px-3 py-2 text-xs font-semibold text-black/75 shadow-sm sm:hidden">
+        <span>{filteredReservations.length} reservas</span>
+        <span aria-hidden="true">·</span>
+        <span>{reservedPeople} pessoas</span>
+        {pendingCount > 0 ? (
+          <span className="text-haus-terracotta">
+            · {pendingCount} aguardando aprovação
+          </span>
+        ) : null}
+      </div>
+
+      <div className="hidden gap-3 sm:grid sm:grid-cols-3">
         <Card className="border border-black/10 bg-white shadow-[0_8px_24px_rgba(0,0,0,0.07)]">
-          <CardContent>
+          <CardContent className="p-3 sm:p-6">
             <p className="text-sm text-black/65">Reservas encontradas</p>
             <p className="mt-2 text-3xl font-extrabold">
               {filteredReservations.length}
@@ -536,32 +562,15 @@ export default function ReservationsPage() {
           </CardContent>
         </Card>
         <Card className="border border-black/10 bg-white shadow-[0_8px_24px_rgba(0,0,0,0.07)]">
-          <CardContent>
+          <CardContent className="p-3 sm:p-6">
             <p className="text-sm text-black/65">Pessoas reservadas</p>
-            <p className="mt-2 text-3xl font-extrabold">
-              {filteredReservations
-                .filter((item) =>
-                  [
-                    'pending_approval',
-                    'confirmed',
-                    'presence_confirmed',
-                    'seated',
-                  ].includes(item.status),
-                )
-                .reduce((sum, item) => sum + item.partySize, 0)}
-            </p>
+            <p className="mt-2 text-3xl font-extrabold">{reservedPeople}</p>
           </CardContent>
         </Card>
-        <Card className="border border-black/10 bg-white shadow-[0_8px_24px_rgba(0,0,0,0.07)]">
-          <CardContent>
+        <Card className="col-span-2 border border-black/10 bg-white shadow-[0_8px_24px_rgba(0,0,0,0.07)] sm:col-span-1">
+          <CardContent className="p-3 sm:p-6">
             <p className="text-sm text-black/65">Aguardando aprovação</p>
-            <p className="mt-2 text-3xl font-extrabold">
-              {
-                filteredReservations.filter(
-                  (item) => item.status === 'pending_approval',
-                ).length
-              }
-            </p>
+            <p className="mt-2 text-3xl font-extrabold">{pendingCount}</p>
           </CardContent>
         </Card>
       </div>
@@ -605,52 +614,68 @@ export default function ReservationsPage() {
                 className="pl-9"
               />
             </div>
-            <NativeSelect
-              aria-label="Filtrar por serviço"
-              value={serviceFilter}
-              onChange={(event) => setServiceFilter(event.target.value)}
-              className="w-full"
+            <Button
+              type="button"
+              variant="outline"
+              className="min-h-11 justify-between sm:hidden"
+              aria-expanded={showAdvancedFilters}
+              onClick={() => setShowAdvancedFilters((current) => !current)}
             >
-              <NativeSelectOption value="todos">
-                Todos os serviços
-              </NativeSelectOption>
-              <NativeSelectOption value="almoco">Almoço</NativeSelectOption>
-              <NativeSelectOption value="rodizio">Rodízio</NativeSelectOption>
-            </NativeSelect>
-            <NativeSelect
-              aria-label="Filtrar por situação"
-              value={statusFilter}
-              onChange={(event) => setStatusFilter(event.target.value)}
-              className="w-full"
+              Mais filtros
+              {serviceFilter !== 'todos' || statusFilter !== 'todos'
+                ? ' · ativos'
+                : ''}
+            </Button>
+            <div
+              className={`${showAdvancedFilters ? 'grid' : 'hidden'} gap-2 sm:contents`}
             >
-              <NativeSelectOption value="todos">
-                Todas as situações
-              </NativeSelectOption>
-              <NativeSelectOption value="pending_approval">
-                Aguardando aprovação
-              </NativeSelectOption>
-              <NativeSelectOption value="sem_mesa">
-                Ainda sem mesa
-              </NativeSelectOption>
-              <NativeSelectOption value="confirmed">
-                Confirmadas
-              </NativeSelectOption>
-              <NativeSelectOption value="presence_confirmed">
-                Presença confirmada
-              </NativeSelectOption>
-              <NativeSelectOption value="seated">
-                Clientes que chegaram
-              </NativeSelectOption>
-              <NativeSelectOption value="cancelled">
-                Canceladas
-              </NativeSelectOption>
-              <NativeSelectOption value="no_show">
-                Não compareceram
-              </NativeSelectOption>
-              <NativeSelectOption value="completed">
-                Concluídas
-              </NativeSelectOption>
-            </NativeSelect>
+              <NativeSelect
+                aria-label="Filtrar por serviço"
+                value={serviceFilter}
+                onChange={(event) => setServiceFilter(event.target.value)}
+                className="w-full"
+              >
+                <NativeSelectOption value="todos">
+                  Todos os serviços
+                </NativeSelectOption>
+                <NativeSelectOption value="almoco">Almoço</NativeSelectOption>
+                <NativeSelectOption value="rodizio">Rodízio</NativeSelectOption>
+              </NativeSelect>
+              <NativeSelect
+                aria-label="Filtrar por situação"
+                value={statusFilter}
+                onChange={(event) => setStatusFilter(event.target.value)}
+                className="w-full"
+              >
+                <NativeSelectOption value="todos">
+                  Todas as situações
+                </NativeSelectOption>
+                <NativeSelectOption value="pending_approval">
+                  Aguardando aprovação
+                </NativeSelectOption>
+                <NativeSelectOption value="sem_mesa">
+                  Ainda sem mesa
+                </NativeSelectOption>
+                <NativeSelectOption value="confirmed">
+                  Confirmadas
+                </NativeSelectOption>
+                <NativeSelectOption value="presence_confirmed">
+                  Presença confirmada
+                </NativeSelectOption>
+                <NativeSelectOption value="seated">
+                  Clientes que chegaram
+                </NativeSelectOption>
+                <NativeSelectOption value="cancelled">
+                  Canceladas
+                </NativeSelectOption>
+                <NativeSelectOption value="no_show">
+                  Não compareceram
+                </NativeSelectOption>
+                <NativeSelectOption value="completed">
+                  Concluídas
+                </NativeSelectOption>
+              </NativeSelect>
+            </div>
           </div>
         </CardHeader>
         <CardContent className="min-w-0">

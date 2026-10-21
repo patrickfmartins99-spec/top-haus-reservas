@@ -576,7 +576,7 @@ export function StaffShell({ children }: { children: ReactNode }) {
                   prefetch={false}
                   onClick={openOfflineConsultation}
                   aria-current={active ? 'page' : undefined}
-                  className={`relative flex min-h-14 flex-col items-center justify-center gap-1 rounded-xl px-0.5 py-1.5 text-[9px] font-bold transition active:scale-[0.97] min-[360px]:px-1 min-[360px]:text-[10px] ${active ? 'bg-[#f1e5dc] text-haus-terracotta' : 'text-black/60'}`}
+                  className={`relative flex min-h-14 flex-col items-center justify-center gap-1 rounded-xl px-0.5 py-1.5 text-[11px] font-bold transition active:scale-[0.97] ${active ? 'bg-[#ead6c7] text-[#723816]' : 'text-black/75'}`}
                 >
                   <span className="relative">
                     <Icon className="size-5" strokeWidth={active ? 2.6 : 2} />
@@ -592,7 +592,7 @@ export function StaffShell({ children }: { children: ReactNode }) {
               <Popover>
                 <PopoverTrigger
                   aria-label="Abrir mais opções"
-                  className={`flex min-h-14 w-full flex-col items-center justify-center gap-1 rounded-xl px-0.5 py-1.5 text-[9px] font-bold transition active:scale-[0.97] min-[360px]:px-1 min-[360px]:text-[10px] ${adminMoreActive ? 'bg-[#f1e5dc] text-haus-terracotta' : 'text-black/60'}`}
+                  className={`flex min-h-14 w-full flex-col items-center justify-center gap-1 rounded-xl px-0.5 py-1.5 text-[11px] font-bold transition active:scale-[0.97] ${adminMoreActive ? 'bg-[#ead6c7] text-[#723816]' : 'text-black/75'}`}
                 >
                   <Menu
                     className="size-5"
@@ -652,7 +652,7 @@ export function StaffShell({ children }: { children: ReactNode }) {
                     ? 'page'
                     : undefined
                 }
-                className={`flex min-h-14 flex-col items-center justify-center gap-1 rounded-xl px-0.5 py-1.5 text-[9px] font-bold transition active:scale-[0.97] min-[360px]:px-1 min-[360px]:text-[10px] ${isActive(pathname, '/painel/configuracoes') ? 'bg-[#f1e5dc] text-haus-terracotta' : 'text-black/60'}`}
+                className={`flex min-h-14 flex-col items-center justify-center gap-1 rounded-xl px-0.5 py-1.5 text-[11px] font-bold transition active:scale-[0.97] ${isActive(pathname, '/painel/configuracoes') ? 'bg-[#ead6c7] text-[#723816]' : 'text-black/75'}`}
               >
                 <Settings className="size-5" />
                 Conta

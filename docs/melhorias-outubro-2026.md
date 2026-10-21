@@ -64,14 +64,6 @@ Não foi adicionado listener nem consulta periódica. A contagem é local; cada 
 
 Contingência não é funcionamento offline completo: exige sessão previamente validada, cópia no mesmo navegador/aparelho e tela disponível. Não permite login novo sem internet, escrita offline nem garante abertura a frio do aplicativo. Relógio incorreto do aparelho pode afetar o contador visual. Instalação, push e falha real de rede no celular ainda exigem validação em aparelho físico.
 
-## Próximos grupos, ainda não entregues
-
-1. Revisão do status das mensagens e confirmação de entrega no aparelho físico; preservar heartbeat de 15 minutos do robô e evitar polling.
-2. Aprofundar contingência (abertura/navegação sem rede) e revisão completa do restante da navegação móvel.
-3. Consulta pública: reduzir busca por telefone, testar formatação de número e ambiguidades de código entre serviços. O formulário foi validado com resposta simulada; isso não comprova disponibilidade do banco de produção.
-
-Publicar em grupos após validação. Não enviar credenciais, contas de serviço, caches de sessão nem a compilação local com configuração fictícia ao repositório.
-
 ## Pacote 2C: repetição segura de inclusões
 
 - Cliente e equipe enviam uma identificação aleatória da tentativa ao criar reserva; a equipe faz o mesmo ao adicionar à fila. Ela permanece igual quando os mesmos dados são reenviados após uma resposta perdida e muda após sucesso ou alteração do formulário.
@@ -91,3 +83,18 @@ Os testes de rotas usam Firebase simulado, sem criar reservas, clientes ou mensa
 - A preparação acontece uma vez por versão do cache nesse navegador e acessa apenas arquivos do site. Não cria listener, polling, leitura ou gravação no Firestore. O logo oficial é servido como arquivo estático para poder aparecer offline.
 - Para preparar esta versão, cada aparelho precisa abrir o aplicativo conectado ao menos uma vez após a publicação. Sem sessão anterior, cópia local válida ou espaço de armazenamento no navegador, não é possível consultar offline. Revogação de acesso feita enquanto o aparelho está offline só pode ser conhecida na reconexão; não se deve tratar essa cópia como registro definitivo.
 - Três testes simulam preparo, reabertura sem rede, erro da hospedagem e exclusão de APIs/dados de cliente do cache. O Chrome local confirmou a reabertura da entrada sem rede e as três páginas preparadas. A navegação completa e a abertura real em Android/iOS continuam pendentes de teste no próprio aparelho da equipe.
+
+## Pacote 2E: consulta pública, celular, avisos e contingência
+
+- Consulta pública passa a usar telefone e data extraída do código. Limita a consulta a 21 documentos para detectar excesso, em vez de examinar até 50 reservas do telefone. Aceita telefone com ou sem código do Brasil e reservas antigas sem campo de código gravado.
+- Quando almoço e rodízio geram o mesmo código para o mesmo telefone e dia, o cliente escolhe a reserva correta antes de confirmar, alterar ou cancelar. A operação seguinte confere código, telefone e documento escolhido. O ID interno não substitui a verificação do cliente.
+- A lista de reservas no celular ganhou resumo curto antes dos cards; filtros avançados ficam recolhidos e podem ser abertos com um toque. A fila mantém o botão principal de atendimento acima das ações secundárias, com alvos de toque maiores. Navegação inferior ganhou legibilidade e contraste.
+- Um aparelho da equipe que já autorizou notificações renova a inscrição ao abrir, voltar ao primeiro plano ou recuperar a rede, no máximo uma vez por dia se estiver saudável. Após falha, aguarda ao menos 15 minutos até uma nova oportunidade; não existe temporizador periódico. O sino aberto não repete cadastro desnecessariamente.
+- A contingência exibe claramente que a fila é uma cópia deste aparelho, potencialmente diferente de outros. Teste em Chrome móvel simulado cobriu consulta ambígua, navegação de 360 px, cópia local da fila e reservas, reabertura em nova aba sem internet, bloqueio de alterações e reconexão. O service worker também foi testado com duas janelas abertas e nenhuma janela aberta para os avisos push.
+- Não foi adicionado listener Firestore, polling, nova consulta periódica nem armazenamento de resposta de API no service worker. A renovação da inscrição envolve uma chamada ao servidor quando necessária; a consulta pública faz leituras proporcionais aos registros daquele telefone e data.
+
+### Limites de validação
+
+Testes locais e navegador simulado não substituem um teste em dois aparelhos reais com o aplicativo instalado, em primeiro e segundo plano, especialmente no iOS. O recebimento depende da permissão do sistema operacional, da inscrição do aparelho e do serviço de push. Não foram criadas reservas nem enviadas mensagens reais para validar este pacote. A contingência é somente de leitura, depende de sessão e cópia recentes no mesmo aparelho, e deve ser reconferida com o Firebase assim que a conexão voltar. O robô do WhatsApp não foi alterado.
+
+Não enviar credenciais, contas de serviço, caches de sessão nem a compilação local com configuração fictícia ao repositório.

@@ -2,7 +2,31 @@
 import { useEffect, useState } from 'react';
 import { BellRing, LoaderCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { shouldRefreshStaffPush } from '@/lib/client/push-refresh';
 import { getFirebaseClient } from '@/lib/firebase/client';
+
+function refreshKeys(uid: string) {
+  return {
+    verified: `tophaus.staff.push.verified.${uid}`,
+    attempted: `tophaus.staff.push.attempted.${uid}`,
+  };
+}
+
+function readLocalTime(key: string) {
+  try {
+    return Number(window.localStorage.getItem(key) ?? 0);
+  } catch {
+    return 0;
+  }
+}
+
+function writeLocalTime(key: string, time: number) {
+  try {
+    window.localStorage.setItem(key, String(time));
+  } catch {
+    // Private browsing must not block a subscription attempt.
+  }
+}
 
 async function pushRequest(action: string, subscription?: PushSubscription) {
   const user = getFirebaseClient()?.auth.currentUser;
@@ -57,7 +81,33 @@ async function subscribeCurrentDevice() {
   }
 
   await pushRequest('subscribe', subscription);
+  const uid = getFirebaseClient()?.auth.currentUser?.uid;
+  if (uid) writeLocalTime(refreshKeys(uid).verified, Date.now());
   return subscription;
+}
+
+let refreshInFlight = false;
+async function refreshAuthorizedDevice() {
+  const uid = getFirebaseClient()?.auth.currentUser?.uid;
+  if (!uid || refreshInFlight || Notification.permission !== 'granted') return;
+  const keys = refreshKeys(uid);
+  const now = Date.now();
+  if (
+    !shouldRefreshStaffPush(
+      now,
+      readLocalTime(keys.verified),
+      readLocalTime(keys.attempted),
+      navigator.onLine,
+    )
+  )
+    return;
+  refreshInFlight = true;
+  writeLocalTime(keys.attempted, now);
+  try {
+    await subscribeCurrentDevice();
+  } finally {
+    refreshInFlight = false;
+  }
 }
 
 export function StaffPushBootstrap() {
@@ -69,20 +119,19 @@ export function StaffPushBootstrap() {
       Notification.permission !== 'granted'
     )
       return;
-
-    const uid = getFirebaseClient()?.auth.currentUser?.uid;
-    const refreshKey = uid ? `tophaus.staff.push.ready.${uid}` : '';
-    if (refreshKey && window.sessionStorage.getItem(refreshKey) === '1') return;
-
-    // Keep a previously-authorized device registered even when the bell is
-    // never opened. This runs once per browser session, not on a timer.
-    void subscribeCurrentDevice()
-      .then(() => {
-        if (refreshKey) window.sessionStorage.setItem(refreshKey, '1');
-      })
-      .catch(() => {
-        // The visible controls still let the collaborator retry and run a test.
+    const refresh = () => {
+      if (document.hidden) return;
+      void refreshAuthorizedDevice().catch(() => {
+        // Failed checks wait for a later visibility or online event.
       });
+    };
+    refresh();
+    document.addEventListener('visibilitychange', refresh);
+    window.addEventListener('online', refresh);
+    return () => {
+      document.removeEventListener('visibilitychange', refresh);
+      window.removeEventListener('online', refresh);
+    };
   }, []);
 
   return null;
@@ -90,13 +139,26 @@ export function StaffPushBootstrap() {
 
 export async function removeStaffPush() {
   if (!('serviceWorker' in navigator)) return;
-  const reg = await navigator.serviceWorker.getRegistration('/');
-  const sub = await reg?.pushManager.getSubscription();
-  if (sub) {
-    try {
-      await pushRequest('unsubscribe', sub);
-    } finally {
-      await sub.unsubscribe();
+  const uid = getFirebaseClient()?.auth.currentUser?.uid;
+  try {
+    const reg = await navigator.serviceWorker.getRegistration('/');
+    const sub = await reg?.pushManager.getSubscription();
+    if (sub) {
+      try {
+        await pushRequest('unsubscribe', sub);
+      } finally {
+        await sub.unsubscribe();
+      }
+    }
+  } finally {
+    if (uid) {
+      try {
+        const keys = refreshKeys(uid);
+        window.localStorage.removeItem(keys.verified);
+        window.localStorage.removeItem(keys.attempted);
+      } catch {
+        // Local storage availability must not prevent logout.
+      }
     }
   }
 }
@@ -118,7 +180,7 @@ export function StaffPushControls() {
           const reg = await registration();
           const sub = await reg.pushManager.getSubscription();
           if (sub && Notification.permission === 'granted') {
-            await pushRequest('subscribe', sub);
+            await refreshAuthorizedDevice();
             if (active) setSubscribed(true);
           }
         } catch (error) {

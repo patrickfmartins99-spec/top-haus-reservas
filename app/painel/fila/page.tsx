@@ -429,10 +429,6 @@ export default function WaitlistPage() {
         />
       ) : null}
 
-      <div className="rounded-xl border border-haus-gold/45 bg-[#f4e7d7] px-4 py-3 text-sm text-black/75">
-        <strong>WhatsApp assistido:</strong> o sistema abre a conversa com a
-        mensagem pronta; o colaborador confere e envia pelo WhatsApp Business.
-      </div>
       {error ? (
         <p
           className="rounded-xl bg-destructive/10 px-4 py-3 text-sm font-medium text-destructive"
@@ -447,7 +443,7 @@ export default function WaitlistPage() {
         </output>
       ) : null}
 
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid grid-cols-2 gap-2 sm:gap-4 xl:grid-cols-4">
         {[
           { label: 'Aguardando', value: waitingQueue.length, icon: Clock3 },
           { label: 'Chamados', value: calledQueue.length, icon: PhoneCall },
@@ -467,12 +463,14 @@ export default function WaitlistPage() {
             key={label}
             className="bg-white shadow-[0_8px_24px_rgba(0,0,0,0.07)] ring-black/7"
           >
-            <CardContent className="flex items-center justify-between">
+            <CardContent className="flex items-center justify-between gap-2 p-3 sm:p-6">
               <div>
-                <p className="text-sm text-black/65">{label}</p>
-                <p className="mt-2 text-2xl font-extrabold">{value}</p>
+                <p className="text-xs font-medium text-black/70 sm:text-sm">
+                  {label}
+                </p>
+                <p className="mt-1 text-2xl font-extrabold sm:mt-2">{value}</p>
               </div>
-              <span className="grid size-10 place-items-center rounded-xl bg-[#eadcd2] text-haus-terracotta">
+              <span className="hidden size-10 place-items-center rounded-xl bg-[#eadcd2] text-haus-terracotta sm:grid">
                 <Icon />
               </span>
             </CardContent>
@@ -484,7 +482,9 @@ export default function WaitlistPage() {
         <CardHeader className="border-b border-black/7">
           <CardTitle>Ordem de atendimento</CardTitle>
           <p className="text-sm text-black/65">
-            Dados salvos no Firebase e compartilhados com toda a equipe.
+            {offlineSavedAt
+              ? 'Exibindo a última cópia deste aparelho; a situação pode ter mudado em outros dispositivos.'
+              : 'Dados salvos no Firebase e compartilhados com toda a equipe.'}
           </p>
         </CardHeader>
         <CardContent className="space-y-3">
@@ -544,21 +544,23 @@ export default function WaitlistPage() {
                   </p>
                   <WaitlistCallCountdown entry={entry} now={now} />
                 </div>
-                <div className="flex w-full flex-wrap gap-2 sm:w-auto [&>*]:min-w-[7.5rem] [&>*]:flex-1 sm:[&>*]:flex-none">
-                  <Button
-                    disabled={saving || Boolean(offlineSavedAt)}
-                    variant="outline"
-                    onClick={() => openEditEntry(entry)}
-                  >
-                    <Pencil /> Editar
-                  </Button>
+                <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto sm:flex-wrap sm:[&>*]:min-w-[7.5rem]">
                   {entry.status === 'waiting' ? (
                     <Button
                       disabled={saving || Boolean(offlineSavedAt)}
                       onClick={() => updateStatus(entry, 'called')}
-                      className="bg-haus-terracotta text-white hover:bg-haus-terracotta/90"
+                      className="col-span-2 min-h-11 bg-haus-terracotta text-white hover:bg-haus-terracotta/90 sm:col-span-1"
                     >
                       <PhoneCall /> Chamar
+                    </Button>
+                  ) : null}
+                  {entry.status === 'called' ? (
+                    <Button
+                      disabled={saving || Boolean(offlineSavedAt)}
+                      onClick={() => updateStatus(entry, 'seated')}
+                      className="col-span-2 min-h-11 bg-black text-white hover:bg-black/85 sm:col-span-1"
+                    >
+                      <Check /> Confirmar chegada
                     </Button>
                   ) : null}
                   {whatsappUrl ? (
@@ -575,15 +577,13 @@ export default function WaitlistPage() {
                       <MessageCircle /> WhatsApp
                     </a>
                   ) : null}
-                  {entry.status === 'called' ? (
-                    <Button
-                      disabled={saving || Boolean(offlineSavedAt)}
-                      onClick={() => updateStatus(entry, 'seated')}
-                      className="bg-black text-white hover:bg-black/85"
-                    >
-                      <Check /> Confirmar chegada
-                    </Button>
-                  ) : null}
+                  <Button
+                    disabled={saving || Boolean(offlineSavedAt)}
+                    variant="outline"
+                    onClick={() => openEditEntry(entry)}
+                  >
+                    <Pencil /> Editar
+                  </Button>
                   <Button
                     disabled={saving || Boolean(offlineSavedAt)}
                     variant="outline"
@@ -609,6 +609,11 @@ export default function WaitlistPage() {
           })}
         </CardContent>
       </Card>
+
+      <p className="text-xs leading-5 text-black/65">
+        WhatsApp assistido: confira a mensagem pronta antes de enviar ao
+        cliente.
+      </p>
 
       <Dialog
         open={dialogOpen}

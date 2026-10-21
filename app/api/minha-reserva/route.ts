@@ -31,7 +31,26 @@ const capacityStatuses = new Set<ReservationStatus>([
 ]);
 
 function digits(value: unknown) {
-  return typeof value === 'string' ? value.replace(/\D/g, '') : '';
+  const phone = typeof value === 'string' ? value.replace(/\D/g, '') : '';
+  return (phone.length === 12 || phone.length === 13) && phone.startsWith('55')
+    ? phone.slice(2)
+    : phone;
+}
+
+function publicCodeDate(code: string, whatsapp: string) {
+  if (!/^\d{10}$/.test(code) || !whatsapp.endsWith(code.slice(0, 4)))
+    return null;
+  const day = Number(code.slice(4, 6));
+  const month = Number(code.slice(6, 8));
+  const year = 2000 + Number(code.slice(8, 10));
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (
+    date.getUTCFullYear() !== year ||
+    date.getUTCMonth() + 1 !== month ||
+    date.getUTCDate() !== day
+  )
+    return null;
+  return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 }
 
 function text(value: unknown, fallback = '') {
@@ -58,6 +77,7 @@ function serializeReservation(
     !['cancelled', 'completed', 'no_show', 'seated'].includes(status);
   return {
     id: reservationCode(data, id),
+    lookupId: id,
     customerName: text(data.customerName),
     whatsapp: text(data.whatsapp),
     partySize: Number(data.partySize ?? 0),
@@ -67,50 +87,82 @@ function serializeReservation(
     notes: text(data.notes),
     status,
     canModify,
+    canDelete:
+      deadline.getTime() >= Date.now() &&
+      !['completed', 'no_show', 'seated'].includes(status),
     modifyDeadline: deadline.toISOString(),
     lateToleranceMinutes,
     restaurantWhatsapp,
   };
 }
 
-async function findReservation(code: unknown, whatsapp: unknown) {
+async function findReservation(
+  code: unknown,
+  whatsapp: unknown,
+  selectedId?: unknown,
+) {
   const database = getAdminDatabase();
   if (!database) return { error: 'FIREBASE' as const };
   const normalizedCode = typeof code === 'string' ? code.trim() : '';
   const normalizedWhatsapp = digits(whatsapp);
   if (
     !/^[a-zA-Z0-9_-]{1,128}$/.test(normalizedCode) ||
-    normalizedWhatsapp.length < 10
+    ![10, 11].includes(normalizedWhatsapp.length) ||
+    (selectedId !== undefined &&
+      (typeof selectedId !== 'string' ||
+        !/^[a-zA-Z0-9_-]{1,128}$/.test(selectedId)))
   )
     return { error: 'INVALID' as const };
   const collection = database.collection('reservations');
-  let reference = collection.doc(normalizedCode);
-  let snapshot = await reference.get();
-  if (
-    snapshot.exists &&
-    !snapshot.data()?.deletedAt &&
-    digits(snapshot.data()?.whatsapp) === normalizedWhatsapp
-  ) {
-    return { database, reference, snapshot, data: snapshot.data() ?? {} };
+  if (selectedId || !/^\d{10}$/.test(normalizedCode)) {
+    const reference = collection.doc(String(selectedId || normalizedCode));
+    const snapshot = await reference.get();
+    const data = snapshot.data();
+    if (
+      snapshot.exists &&
+      !data?.deletedAt &&
+      digits(data?.whatsapp) === normalizedWhatsapp &&
+      (selectedId
+        ? reservationCode(data ?? {}, reference.id) === normalizedCode
+        : true)
+    )
+      return { database, reference, snapshot, data: data ?? {} };
+    return { error: 'NOT_FOUND' as const };
   }
-
+  const serviceDate = publicCodeDate(normalizedCode, normalizedWhatsapp);
+  if (!serviceDate) return { error: 'NOT_FOUND' as const };
+  // Equality indexes can be merged by Firestore. This also covers old
+  // reservations without a stored reservationCode field.
   const candidates = await collection
     .where('whatsapp', '==', normalizedWhatsapp)
-    .limit(50)
+    .where('serviceDate', '==', serviceDate)
+    .limit(21)
     .get();
-  const match = candidates.docs.find((document) => {
+  if (candidates.docs.length > 20) return { error: 'TOO_MANY' as const };
+  const matches = candidates.docs.filter((document) => {
     const data = document.data();
     return (
       !data.deletedAt && reservationCode(data, document.id) === normalizedCode
     );
   });
-  if (!match) return { error: 'NOT_FOUND' as const };
-  reference = collection.doc(match.id);
-  snapshot = match;
-  return { database, reference, snapshot, data: match.data() ?? {} };
+  if (!matches.length) return { error: 'NOT_FOUND' as const };
+  if (matches.length > 1)
+    return {
+      error: 'AMBIGUOUS' as const,
+      database,
+      matches: matches.map((snapshot) => ({
+        reference: collection.doc(snapshot.id),
+        data: snapshot.data() ?? {},
+      })),
+    };
+  const snapshot = matches[0];
+  const reference = collection.doc(snapshot.id);
+  return { database, reference, snapshot, data: snapshot.data() ?? {} };
 }
 
-function lookupError(error: 'FIREBASE' | 'INVALID' | 'NOT_FOUND') {
+function lookupError(
+  error: 'FIREBASE' | 'INVALID' | 'NOT_FOUND' | 'AMBIGUOUS' | 'TOO_MANY',
+) {
   if (error === 'FIREBASE')
     return NextResponse.json(
       { error: 'Sistema temporariamente indisponível.' },
@@ -120,6 +172,16 @@ function lookupError(error: 'FIREBASE' | 'INVALID' | 'NOT_FOUND') {
     return NextResponse.json(
       { error: 'Informe o código e o WhatsApp usados na reserva.' },
       { status: 400 },
+    );
+  if (error === 'AMBIGUOUS' || error === 'TOO_MANY')
+    return NextResponse.json(
+      {
+        error:
+          error === 'AMBIGUOUS'
+            ? 'Há mais de uma reserva com este código. Consulte novamente e escolha o serviço desejado.'
+            : 'Há muitas reservas com estes dados. Fale com a equipe para localizar a sua.',
+      },
+      { status: 409 },
     );
   return NextResponse.json(
     {
@@ -136,6 +198,23 @@ export async function POST(request: Request) {
     unknown
   > | null;
   const result = await findReservation(payload?.code, payload?.whatsapp);
+  if (result.error === 'AMBIGUOUS') {
+    const settings = await getOperationalSettings(result.database);
+    return NextResponse.json(
+      {
+        choices: result.matches.map(({ reference, data }) =>
+          serializeReservation(
+            reference.id,
+            data,
+            CANCELLATION_HOURS,
+            settings.lateToleranceMinutes,
+            settings.restaurantWhatsapp,
+          ),
+        ),
+      },
+      { headers: { 'Cache-Control': 'private, no-store' } },
+    );
+  }
   if (result.error) return lookupError(result.error);
   const settings = await getOperationalSettings(result.database);
   return NextResponse.json(
@@ -157,7 +236,11 @@ export async function PATCH(request: Request) {
     string,
     unknown
   > | null;
-  const result = await findReservation(payload?.code, payload?.whatsapp);
+  const result = await findReservation(
+    payload?.code,
+    payload?.whatsapp,
+    payload?.lookupId,
+  );
   if (result.error) return lookupError(result.error);
 
   const action = payload?.action;
@@ -709,7 +792,11 @@ export async function PATCH(request: Request) {
 
 export async function DELETE(request: Request) {
   const payload = await request.json().catch(() => null);
-  const result = await findReservation(payload?.code, payload?.whatsapp);
+  const result = await findReservation(
+    payload?.code,
+    payload?.whatsapp,
+    payload?.lookupId,
+  );
   if (result.error) return lookupError(result.error);
   try {
     await deleteReservation(result.database, result.reference.id, {

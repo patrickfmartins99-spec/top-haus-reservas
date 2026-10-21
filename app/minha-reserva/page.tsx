@@ -38,6 +38,7 @@ import { buildWhatsAppUrl } from '@/lib/whatsapp';
 
 type Reservation = {
   id: string;
+  lookupId: string;
   customerName: string;
   whatsapp: string;
   partySize: number;
@@ -47,6 +48,7 @@ type Reservation = {
   notes: string;
   status: string;
   canModify: boolean;
+  canDelete: boolean;
   modifyDeadline: string;
   lateToleranceMinutes: number;
   restaurantWhatsapp: string;
@@ -77,6 +79,7 @@ export default function MinhaReservaPage() {
   const [code, setCode] = useState('');
   const [whatsapp, setWhatsapp] = useState('');
   const [reservation, setReservation] = useState<Reservation | null>(null);
+  const [choices, setChoices] = useState<Reservation[]>([]);
   const [draft, setDraft] = useState<Reservation | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -90,7 +93,11 @@ export default function MinhaReservaPage() {
       const response = await fetch('/api/minha-reserva', {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code: reservation?.id, whatsapp }),
+        body: JSON.stringify({
+          code: reservation?.id,
+          lookupId: reservation?.lookupId,
+          whatsapp,
+        }),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error);
@@ -133,6 +140,12 @@ export default function MinhaReservaPage() {
         throw new Error(
           data.error ?? 'Não foi possível concluir a solicitação.',
         );
+      if (Array.isArray(data.choices)) {
+        setChoices(data.choices);
+        setReservation(null);
+        return null;
+      }
+      setChoices([]);
       setReservation(data.reservation);
       return data.reservation as Reservation;
     } catch (caughtError) {
@@ -155,6 +168,7 @@ export default function MinhaReservaPage() {
   async function confirmPresence() {
     const updated = await request('PATCH', {
       code: reservation?.id,
+      lookupId: reservation?.lookupId,
       whatsapp,
       action: 'confirm_presence',
     });
@@ -164,6 +178,7 @@ export default function MinhaReservaPage() {
   async function cancelReservation() {
     const updated = await request('PATCH', {
       code: reservation?.id,
+      lookupId: reservation?.lookupId,
       whatsapp,
       action: 'cancel',
     });
@@ -178,6 +193,7 @@ export default function MinhaReservaPage() {
     if (!draft) return;
     const updated = await request('PATCH', {
       code: reservation?.id,
+      lookupId: reservation?.lookupId,
       whatsapp,
       action: 'update',
       reservation: draft,
@@ -256,7 +272,48 @@ export default function MinhaReservaPage() {
                 {success}
               </output>
             ) : null}
-            {!reservation ? (
+            {choices.length ? (
+              <div className="space-y-4">
+                <h2 className="text-2xl font-bold tracking-tight">
+                  Escolha a reserva
+                </h2>
+                <p className="text-sm leading-6 text-black/65">
+                  Encontramos mais de uma reserva com este código e WhatsApp.
+                  Confira o serviço e o horário antes de continuar.
+                </p>
+                <div className="space-y-3">
+                  {choices.map((choice) => (
+                    <button
+                      key={choice.lookupId}
+                      type="button"
+                      className="flex min-h-20 w-full flex-col justify-center rounded-xl border border-black/15 bg-white px-4 py-3 text-left shadow-sm transition hover:border-haus-terracotta hover:bg-[#fbf4ee]"
+                      onClick={() => {
+                        setReservation(choice);
+                        setChoices([]);
+                      }}
+                    >
+                      <span className="font-bold">
+                        {choice.service === 'almoco' ? 'Almoço' : 'Rodízio'} ·{' '}
+                        {choice.arrivalTime}
+                      </span>
+                      <span className="mt-1 text-sm text-black/70">
+                        {formatDate(choice.serviceDate)} · {choice.partySize}{' '}
+                        {choice.partySize === 1 ? 'pessoa' : 'pessoas'} ·{' '}
+                        {statusLabels[choice.status] ?? choice.status}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="w-full"
+                  onClick={() => setChoices([])}
+                >
+                  Consultar outro código
+                </Button>
+              </div>
+            ) : !reservation ? (
               <form onSubmit={findReservation} className="space-y-5">
                 <div>
                   <h2 className="text-2xl font-bold tracking-tight">
@@ -369,6 +426,7 @@ export default function MinhaReservaPage() {
                     className="h-11"
                     onClick={() => {
                       setReservation(null);
+                      setChoices([]);
                       setSuccess('');
                       setError('');
                     }}
@@ -408,10 +466,7 @@ export default function MinhaReservaPage() {
                     </Button>
                   )}
                 </div>
-                {(reservation.canModify ||
-                  (reservation.status === 'cancelled' &&
-                    new Date(reservation.modifyDeadline).getTime() >=
-                      Date.now())) && (
+                {reservation.canDelete && (
                   <Button
                     type="button"
                     variant="outline"

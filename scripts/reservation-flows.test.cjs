@@ -161,6 +161,44 @@ function fixture(status = 'confirmed') {
     heldSeats: status === 'cancelled' ? 6 : 10,
   });
 }
+function enableReservationQueries() {
+  const originalCollection = db.collection.bind(db);
+  const queries = [];
+  db.collection = (name) => {
+    const collection = originalCollection(name);
+    if (name !== 'reservations') return collection;
+    const filters = [];
+    let maximum = Infinity;
+    return {
+      doc: collection.doc,
+      where(field, operator, value) {
+        filters.push({ field, operator, value });
+        return this;
+      },
+      limit(value) {
+        maximum = value;
+        return this;
+      },
+      async get() {
+        queries.push({ filters: [...filters], maximum });
+        const docs = [...db.data]
+          .filter(([key]) => key.startsWith('reservations/'))
+          .map(([key, data]) => ({
+            id: key.slice('reservations/'.length),
+            data: () => data,
+          }))
+          .filter((document) =>
+            filters.every(({ field, operator, value }) =>
+              operator === '==' && document.data()[field] === value,
+            ),
+          )
+          .slice(0, maximum);
+        return { docs, size: docs.length, empty: docs.length === 0 };
+      },
+    };
+  };
+  return queries;
+}
 function request(method, data) {
   return new Request('http://localhost/api/test', {
     method,
@@ -463,6 +501,94 @@ test('consulta não expõe reserva excluída nem aceita caminho inválido', asyn
     ).status,
     400,
   );
+});
+test('consulta por código lê só o telefone e a data, aceita +55 e separa almoço de rodízio', async () => {
+  fixture();
+  db.data.set('reservations/r2', {
+    ...input,
+    service: 'almoco',
+    arrivalTime: '11:15',
+    reservationCode: '0000121226',
+    status: 'confirmed',
+  });
+  db.data.set('reservations/r3', {
+    ...input,
+    serviceDate: '2026-12-13',
+    reservationCode: '0000131226',
+    status: 'confirmed',
+  });
+  const queries = enableReservationQueries();
+  const response = await clientRoute.POST(request('POST', {
+    code: '0000121226',
+    whatsapp: '+55 (47) 99999-0000',
+  }));
+  assert.equal(response.status, 200);
+  const data = await response.json();
+  assert.deepEqual(data.choices.map((item) => item.lookupId).sort(), ['r1', 'r2']);
+  assert.equal(queries.length, 1);
+  assert.deepEqual(queries[0], {
+    filters: [
+      { field: 'whatsapp', operator: '==', value: input.whatsapp },
+      { field: 'serviceDate', operator: '==', value: input.serviceDate },
+    ],
+    maximum: 21,
+  });
+  const selected = await clientRoute.PATCH(request('PATCH', {
+    code: '0000121226',
+    lookupId: 'r2',
+    whatsapp: '+55 (47) 99999-0000',
+    action: 'confirm_presence',
+  }));
+  assert.equal(selected.status, 200);
+  assert.equal(db.data.get('reservations/r2').status, 'presence_confirmed');
+  assert.equal(db.data.get('reservations/r1').status, 'confirmed');
+  assert.equal(queries.length, 1, 'selected mutation must use one document');
+});
+test('consulta aceita reserva antiga sem código salvo e rejeita seleção trocada', async () => {
+  fixture();
+  delete db.data.get('reservations/r1').reservationCode;
+  db.data.set('reservations/r3', {
+    ...input,
+    serviceDate: '2026-12-13',
+    status: 'confirmed',
+  });
+  enableReservationQueries();
+  const response = await clientRoute.POST(request('POST', {
+    code: '0000121226', whatsapp: input.whatsapp,
+  }));
+  assert.equal((await response.json()).reservation.lookupId, 'r1');
+  const swapped = await clientRoute.PATCH(request('PATCH', {
+    code: '0000121226', lookupId: 'r3', whatsapp: input.whatsapp,
+    action: 'confirm_presence',
+  }));
+  assert.equal(swapped.status, 404);
+});
+test('código incompatível ou data impossível não inicia consulta ao Firestore', async () => {
+  fixture();
+  const queries = enableReservationQueries();
+  for (const code of ['9999121226', '0000310226']) {
+    const response = await clientRoute.POST(request('POST', {
+      code, whatsapp: input.whatsapp,
+    }));
+    assert.equal(response.status, 404);
+  }
+  assert.equal(queries.length, 0);
+});
+test('mais de 20 registros no mesmo dia não produz seleção incompleta', async () => {
+  fixture();
+  for (let index = 2; index <= 22; index += 1) {
+    db.data.set(`reservations/r${index}`, {
+      ...input,
+      reservationCode: '0000121226',
+      status: 'cancelled',
+    });
+  }
+  const queries = enableReservationQueries();
+  const response = await clientRoute.POST(request('POST', {
+    code: '0000121226', whatsapp: input.whatsapp,
+  }));
+  assert.equal(response.status, 409);
+  assert.equal(queries[0].maximum, 21);
 });
 test('textos distinguem análise, confirmação e cancelamento', () => {
   assert.match(
