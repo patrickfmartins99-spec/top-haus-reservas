@@ -42,6 +42,8 @@ import {
 import { getFirebaseClient } from '@/lib/firebase/client';
 import type { SpecialDateException } from '@/lib/domain/special-dates';
 import { fetchWithTimeout } from '@/lib/client/fetch-with-timeout';
+import { useStaffEntitySync } from '@/components/use-staff-entity-sync';
+import { mergeStaffEntity } from '@/lib/client/staff-events';
 import {
   brazilDate,
   cacheBelongsToToday,
@@ -154,6 +156,46 @@ export default function ReservationsPage() {
   }
   const [editingReservation, setEditingReservation] =
     useState<Reservation | null>(null);
+
+  useStaffEntitySync({
+    scope: `${currentUser?.uid ?? ''}:${dateFilter}:${targetId}`,
+    ready:
+      Boolean(currentUser) &&
+      !loading &&
+      !saving &&
+      !loadingMore &&
+      !offlineSavedAt,
+    accepts: (event) =>
+      event.entityType === 'reservation' &&
+      (targetId
+        ? targetId === event.entityId
+        : !dateFilter ||
+          !event.serviceDate ||
+          event.serviceDate === dateFilter ||
+          reservations.some((item) => item.id === event.entityId)),
+    load: async (event) => {
+      const data = await loadReservations(currentUser!, '', '', event.entityId);
+      return () =>
+        setReservations((current) => {
+          const next = mergeStaffEntity(
+            current,
+            event.entityId,
+            data.reservations[0],
+            (item) =>
+              Boolean(targetId) ||
+              !dateFilter ||
+              item.serviceDate === dateFilter,
+          );
+          if (!targetId && dateFilter === brazilDate())
+            writeStaffCache('reservations', next);
+          return next;
+        });
+    },
+    onError: () =>
+      setError(
+        'Não foi possível sincronizar uma alteração. Atualize a página para conferir a reserva antes de editar.',
+      ),
+  });
 
   const refresh = useCallback(
     async (user: User) => {

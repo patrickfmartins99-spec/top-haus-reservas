@@ -36,20 +36,32 @@ export async function GET(request: Request) {
       { status: 503 },
     );
 
-  const activeOnly = new URL(request.url).searchParams.get('ativas') === '1';
-  const snapshot = activeOnly
-    ? await database
-        .collection('waitlist')
-        .where('status', 'in', ['waiting', 'called'])
-        .limit(100)
-        .get()
-    : await database
-        .collection('waitlist')
-        .orderBy('enteredAt', 'asc')
-        .limit(200)
-        .get();
+  const search = new URL(request.url).searchParams;
+  const activeOnly = search.get('ativas') === '1';
+  const id = search.get('id');
+  if (id !== null && !/^[A-Za-z0-9_-]{1,160}$/.test(id))
+    return NextResponse.json(
+      { error: 'Cliente da fila inválido.' },
+      { status: 400 },
+    );
+  const single = id
+    ? await database.collection('waitlist').doc(id).get()
+    : null;
+  const snapshot = single
+    ? { docs: single.exists ? [single] : [] }
+    : activeOnly
+      ? await database
+          .collection('waitlist')
+          .where('status', 'in', ['waiting', 'called'])
+          .limit(100)
+          .get()
+      : await database
+          .collection('waitlist')
+          .orderBy('enteredAt', 'asc')
+          .limit(200)
+          .get();
   const entries = snapshot.docs.map((document) => {
-    const data = document.data();
+    const data = document.data() ?? {};
     return {
       id: document.id,
       customerName: String(data.customerName ?? ''),

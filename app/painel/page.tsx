@@ -28,6 +28,8 @@ import {
 import { RESERVATION_NO_SHOW_REASONS } from '@/lib/domain/service-outcomes';
 import { getFirebaseClient } from '@/lib/firebase/client';
 import { fetchWithTimeout } from '@/lib/client/fetch-with-timeout';
+import { useStaffEntitySync } from '@/components/use-staff-entity-sync';
+import { mergeStaffEntity } from '@/lib/client/staff-events';
 import {
   cacheBelongsToToday,
   readStaffCache,
@@ -73,6 +75,61 @@ export default function DashboardPage() {
   const [noShowReservation, setNoShowReservation] =
     useState<Reservation | null>(null);
   const [now, setNow] = useState(() => Date.now());
+
+  useStaffEntitySync({
+    scope: currentUser?.uid ?? '',
+    ready: Boolean(currentUser) && !loading && !actionBusy && !offlineSavedAt,
+    accepts: (event) =>
+      event.entityType === 'waitlist' ||
+      !event.serviceDate ||
+      event.serviceDate === localDate() ||
+      reservations.some((item) => item.id === event.entityId),
+    load: async (event) => {
+      const headers = {
+        Authorization: `Bearer ${await currentUser!.getIdToken()}`,
+      };
+      const path = event.entityType === 'reservation' ? 'reservas' : 'fila';
+      const response = await fetchWithTimeout(
+        `/api/${path}?id=${encodeURIComponent(event.entityId)}`,
+        { headers },
+      );
+      const data = await response.json();
+      if (!response.ok) throw new Error('SYNC_FAILED');
+      return () => {
+        if (event.entityType === 'reservation') {
+          setReservations((current) => {
+            const next = mergeStaffEntity(
+              current,
+              event.entityId,
+              data.reservations[0] as Reservation | undefined,
+              (item) => item.serviceDate === localDate(),
+            );
+            writeStaffCache('reservations', next);
+            return next;
+          });
+        } else {
+          setQueue((current) => {
+            const next = mergeStaffEntity(
+              current,
+              event.entityId,
+              data.entries[0] as QueueEntry | undefined,
+              (item) => ['waiting', 'called'].includes(item.status),
+            ).sort((a, b) =>
+              String(a.enteredAt ?? '').localeCompare(
+                String(b.enteredAt ?? ''),
+              ),
+            );
+            writeStaffCache('waitlist', next);
+            return next;
+          });
+        }
+      };
+    },
+    onError: () =>
+      setError(
+        'Não foi possível sincronizar uma alteração. Atualize a página para conferir os dados mais recentes.',
+      ),
+  });
 
   const loadLiveData = useCallback(async (user: User) => {
     const token = await user.getIdToken();

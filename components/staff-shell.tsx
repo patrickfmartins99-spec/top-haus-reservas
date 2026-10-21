@@ -2,7 +2,7 @@
 import Image from 'next/image';
 
 import type { ReactNode } from 'react';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
@@ -48,6 +48,11 @@ import {
 import { getFirebaseClient } from '@/lib/firebase/client';
 import { fetchWithTimeout } from '@/lib/client/fetch-with-timeout';
 import {
+  isStaffEntityEvent,
+  newStaffEvents,
+  publishStaffEvent,
+} from '@/lib/client/staff-events';
+import {
   clearStaffCache,
   readStaffCache,
   writeStaffCache,
@@ -87,6 +92,14 @@ export function StaffShell({ children }: { children: ReactNode }) {
   const [profile, setProfile] = useState<StaffProfile | null>(null);
   const [sessionError, setSessionError] = useState('');
   const [offlineSession, setOfflineSession] = useState(false);
+  const [notificationError, setNotificationError] = useState(false);
+  const [syncGap, setSyncGap] = useState(false);
+  const [notificationAttempt, setNotificationAttempt] = useState(0);
+  const notificationHistory = useRef({
+    uid: '',
+    initialized: false,
+    ids: new Set<string>(),
+  });
   async function refreshProfile() {
     const user = getFirebaseClient()?.auth.currentUser;
     if (!user) return;
@@ -157,6 +170,14 @@ export function StaffShell({ children }: { children: ReactNode }) {
     const user = firebase?.auth.currentUser;
     if (!firebase || !user) return;
     const seenKey = `tophaus.staff.notifications.seen.${user.uid}`;
+    if (notificationHistory.current.uid !== user.uid)
+      notificationHistory.current = {
+        uid: user.uid,
+        initialized: false,
+        ids: new Set<string>(),
+      };
+    const history = notificationHistory.current;
+    const startedAt = Date.now();
     const loadSeen = window.setTimeout(() => {
       try {
         const saved = JSON.parse(window.localStorage.getItem(seenKey) ?? '[]');
@@ -173,6 +194,26 @@ export function StaffShell({ children }: { children: ReactNode }) {
             limit(20),
           ),
           (snapshot) => {
+            setNotificationError(false);
+            const events = snapshot.docs
+              .map((document) => ({
+                ...document.data(),
+                id: document.id,
+              }))
+              .filter(isStaffEntityEvent);
+            const fresh = newStaffEvents(events, history.ids);
+            // A bounded feed cannot reconstruct an arbitrarily long offline gap.
+            if (history.initialized && fresh.length >= 20) setSyncGap(true);
+            for (const event of fresh) {
+              const createdAt =
+                snapshot.docs
+                  .find((doc) => doc.id === event.id)
+                  ?.data()
+                  .createdAt?.toMillis?.() ?? 0;
+              if (history.initialized || createdAt >= startedAt)
+                publishStaffEvent(event);
+            }
+            history.initialized = true;
             setNotifications(
               snapshot.docs.map((document) => {
                 const data = document.data();
@@ -192,7 +233,7 @@ export function StaffShell({ children }: { children: ReactNode }) {
             );
           },
           () => {
-            // As notificações móveis continuam funcionando se o sino ficar offline.
+            setNotificationError(true);
           },
         )
       : () => {};
@@ -200,7 +241,7 @@ export function StaffShell({ children }: { children: ReactNode }) {
       window.clearTimeout(loadSeen);
       stopRealtime();
     };
-  }, [checkingSession]);
+  }, [checkingSession, notificationAttempt]);
 
   function markNotificationsRead() {
     const user = getFirebaseClient()?.auth.currentUser;
@@ -455,6 +496,25 @@ export function StaffShell({ children }: { children: ReactNode }) {
                 aparelho. Os dados disponíveis serão somente para consulta.
               </div>
             ) : null}
+            {notificationError || syncGap ? (
+              <output className="flex flex-wrap items-center justify-center gap-3 border-b border-amber-700/20 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+                <span>
+                  {syncGap
+                    ? 'Houve várias alterações durante sua ausência. Atualize o painel para conferir a lista completa.'
+                    : 'Atualização automática pausada. As informações na tela podem estar desatualizadas.'}
+                </span>
+                <button
+                  className="min-h-11 rounded-lg border border-amber-800/30 px-3 font-bold"
+                  onClick={() =>
+                    syncGap
+                      ? window.location.reload()
+                      : setNotificationAttempt((attempt) => attempt + 1)
+                  }
+                >
+                  {syncGap ? 'Atualizar painel' : 'Reconectar avisos'}
+                </button>
+              </output>
+            ) : null}
             {children}
           </section>
         </div>
@@ -463,9 +523,7 @@ export function StaffShell({ children }: { children: ReactNode }) {
           className="fixed inset-x-0 bottom-0 z-40 border-t border-black/10 bg-white/95 pb-[max(0.4rem,env(safe-area-inset-bottom))] shadow-[0_-8px_30px_rgba(0,0,0,0.10)] backdrop-blur lg:hidden"
           aria-label="Navegação principal no celular"
         >
-          <div
-            className={`mx-auto grid max-w-lg gap-1 px-1.5 pt-1.5 ${profile.role === 'admin' ? 'grid-cols-4' : 'grid-cols-3'}`}
-          >
+          <div className="mx-auto grid max-w-lg grid-cols-4 gap-1 px-1.5 pt-1.5">
             {mobilePrimaryNavigation.map(({ icon: Icon, label, href }) => {
               const active = isActive(pathname, href);
               return (

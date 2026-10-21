@@ -32,6 +32,10 @@ import {
   dispatchReservationPush,
 } from '@/lib/firebase/reservation-notifications';
 import { deleteReservation } from '@/lib/firebase/delete-reservation';
+import {
+  enqueueStaffNotification,
+  dispatchStaffNotifications,
+} from '@/lib/firebase/staff-push';
 
 const allowedStatuses: ReservationStatus[] = [
   'pending_approval',
@@ -83,13 +87,13 @@ export async function PATCH(
     const { id } = await params;
     const ref = db.collection('reservations').doc(id);
     try {
-      await db.runTransaction(async (tx) => {
+      const changed = await db.runTransaction(async (tx) => {
         const current = await tx.get(ref);
         if (!current.exists || current.data()?.deletedAt)
           throw new Error('NOT_FOUND');
         const tableLabel = (payload.tableLabel as string).trim();
         const before = String(current.data()?.tableLabel ?? '');
-        if (before === tableLabel) return;
+        if (before === tableLabel) return false;
         tx.update(ref, {
           tableLabel,
           updatedAt: FieldValue.serverTimestamp(),
@@ -103,7 +107,20 @@ export async function PATCH(
           changes: { before: { tableLabel: before }, after: { tableLabel } },
           createdAt: FieldValue.serverTimestamp(),
         });
+        // Internal event only: changing the table does not message the customer.
+        enqueueStaffNotification(db, tx, {
+          id: db.collection('staffNotifications').doc().id,
+          eventType: 'reservation_table_assigned',
+          entityId: id,
+          payload: { ...current.data(), tableLabel },
+          actor: {
+            type: 'staff',
+            name: context.user?.displayName ?? context.decodedToken.name,
+          },
+        });
+        return true;
       });
+      if (changed) after(() => dispatchStaffNotifications(db));
     } catch (error) {
       if (error instanceof Error && error.message === 'NOT_FOUND')
         return NextResponse.json(

@@ -42,6 +42,8 @@ import {
 } from '@/lib/domain/service-outcomes';
 import { getFirebaseClient } from '@/lib/firebase/client';
 import { fetchWithTimeout } from '@/lib/client/fetch-with-timeout';
+import { useStaffEntitySync } from '@/components/use-staff-entity-sync';
+import { mergeStaffEntity } from '@/lib/client/staff-events';
 import {
   cacheBelongsToToday,
   readStaffCache,
@@ -106,6 +108,37 @@ export default function WaitlistPage() {
     entry: QueueEntry;
     status: 'removed' | 'no_show';
   } | null>(null);
+
+  useStaffEntitySync({
+    scope: currentUser?.uid ?? '',
+    ready: Boolean(currentUser) && !loading && !saving && !offlineSavedAt,
+    accepts: (event) => event.entityType === 'waitlist',
+    load: async (event) => {
+      const response = await staffRequest(
+        currentUser!,
+        `/api/fila?id=${encodeURIComponent(event.entityId)}`,
+      );
+      const data = await response.json();
+      if (!response.ok) throw new Error('SYNC_FAILED');
+      return () =>
+        setQueue((current) => {
+          const next = mergeStaffEntity(
+            current,
+            event.entityId,
+            data.entries[0] as QueueEntry | undefined,
+            (item) => ['waiting', 'called'].includes(item.status),
+          ).sort((a, b) =>
+            String(a.enteredAt ?? '').localeCompare(String(b.enteredAt ?? '')),
+          );
+          writeStaffCache('waitlist', next);
+          return next;
+        });
+    },
+    onError: () =>
+      setError(
+        'Não foi possível sincronizar uma alteração da fila. Atualize a página antes de continuar o atendimento.',
+      ),
+  });
 
   const loadQueue = useCallback(async (user: User) => {
     const response = await staffRequest(user, '/api/fila?ativas=1');

@@ -104,6 +104,11 @@ export function staffNotificationContent(input: StaffNotificationInput) {
         title: `Reserva alterada por ${actorName}`,
         description: details,
       };
+    case 'reservation_table_assigned':
+      return {
+        title: `Mesa definida por ${actorName}`,
+        description: `${details} Mesa: ${safeText(payload.tableLabel, 'a definir')}.`,
+      };
     case 'reservation_cancelled':
       return {
         title:
@@ -180,6 +185,7 @@ export function enqueueStaffNotification(
     eventType: input.eventType,
     entityId: input.entityId,
     entityType: input.entityType ?? 'reservation',
+    serviceDate: safeText(input.payload?.serviceDate),
     actorType: input.actor?.type ?? 'system',
     actorName: safeText(input.actor?.name),
     href:
@@ -195,8 +201,9 @@ export async function sendStaffPush(
   db: Firestore,
   subscription: webpush.PushSubscription,
   event: { id: string; title: string; description?: string; href: string },
+  suppliedKeys?: { publicKey: string; privateKey: string },
 ) {
-  const keys = await getPushKeys(db);
+  const keys = suppliedKeys ?? (await getPushKeys(db));
   await webpush.sendNotification(
     subscription,
     JSON.stringify({
@@ -212,7 +219,7 @@ export async function sendStaffPush(
       timeout: 5000,
       vapidDetails: {
         ...keys,
-        subject: 'https://reservastophaus.netlify.app',
+        subject: 'https://reservas-tophaus.netlify.app',
       },
     },
   );
@@ -222,14 +229,19 @@ export async function dispatchStaffNotifications(db: Firestore) {
   try {
     const authentication = getAdminAuthentication();
     if (!authentication) return;
-    const [events, subscriptions] = await Promise.all([
-      db
-        .collection('staffNotifications')
-        .where('pushStatus', '==', 'pending')
-        .limit(20)
-        .get(),
-      db.collection('staffPushSubscriptions').limit(100).get(),
-    ]);
+    const events = await db
+      .collection('staffNotifications')
+      .where('pushStatus', '==', 'pending')
+      .limit(20)
+      .get();
+    // No pending event: do not read all devices or revalidate all users.
+    if (!events.docs.length) return;
+    const subscriptions = await db
+      .collection('staffPushSubscriptions')
+      .where('expiresAt', '>', Date.now())
+      .limit(100)
+      .get();
+    let keys: ReturnType<typeof getPushKeys> | undefined;
     const active = new Map<string, boolean>();
     for (const uid of new Set(
       subscriptions.docs.map((subscription) =>
@@ -270,12 +282,18 @@ export async function dispatchStaffNotifications(db: Firestore) {
         const results = await Promise.all(
           devices.map(async (subscription) => {
             try {
-              await sendStaffPush(db, subscription.data().subscription, {
-                id: event.id,
-                title: event.data().title,
-                description: event.data().description,
-                href: event.data().href,
-              });
+              keys ??= getPushKeys(db);
+              await sendStaffPush(
+                db,
+                subscription.data().subscription,
+                {
+                  id: event.id,
+                  title: event.data().title,
+                  description: event.data().description,
+                  href: event.data().href,
+                },
+                await keys,
+              );
               return true;
             } catch (error) {
               if (

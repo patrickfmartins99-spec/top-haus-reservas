@@ -29,9 +29,26 @@ Nenhum temporizador de consulta ao Firebase foi adicionado. O histórico consult
 
 As notificações e o robô existentes não foram reconfigurados neste pacote. Não há garantia de disponibilidade irrestrita nem de saldo final: tráfego, funções e publicações também consomem recursos. Testes locais não geram deploys no Netlify.
 
-## Próximos grupos, ainda não entregues neste pacote
+## Pacote 2A: sincronização por evento e custo do push
 
-1. Sincronização por evento entre os painéis, revisão do custo das notificações e status de mensagens; preservar heartbeat de 15 minutos do robô e evitar polling.
+- Painel geral, reservas e fila reaproveitam o único listener do sino (20 avisos). Não foi criado outro listener, rotina agendada ou consulta periódica.
+- Ao receber um evento novo, somente o registro afetado é consultado. Fila ganhou consulta autenticada por ID, com uma leitura de documento. Reservas de outra data são ignoradas quando não estão na lista atual.
+- Alterações de entrega (`processing`/`sent`) do mesmo aviso não provocam nova consulta da reserva. Eventos próximos do mesmo registro são agrupados por 300 ms; isso é um atraso local acionado por evento, não polling.
+- Em segundo plano, mudanças aguardam localmente até a página ficar visível. Limite de 100 registros pendentes; falhas e excesso exibem orientação de atualização manual. Feed com 20 eventos novos sem sobreposição sinaliza possível lacuna após desconexão.
+- Leituras em andamento não aplicam resultados após trocar de página/filtro nem sobrescrevem uma atualização mais nova já recebida. Edições em formulário mantêm os valores digitados e a proteção de versão do pacote 1.
+- Definir mesa gera somente aviso interno, com auditoria existente; não gera WhatsApp para o cliente. Repetir a mesma mesa não gera outro evento.
+- Push lê a chave uma vez por lote, em vez de uma vez por aparelho por aviso. Sem evento pendente, não consulta inscrições; inscrições vencidas são excluídas da consulta. Validação dos colaboradores ativos e trava de envio permanecem.
+- Corrigida a grade do menu de colaborador: quatro opções ocupam quatro colunas, incluindo Conta.
+
+### Consumo e limites do pacote 2A
+
+Há uma leitura do registro alterado por tela ativa interessada (mais autenticação e chamada HTTP), em vez de recarregar toda a lista. Os custos existentes do listener, consultas/retentativas do SDK e gravações de entrega continuam existindo. Não é consumo zero nem garantia contra esgotamento de cota. Atualização automática exige conexão; longas desconexões podem exigir atualização manual. Push móvel continua dependendo das permissões do aparelho e do provedor.
+
+Testes isolados cobrem ausência de leitura sem evento, agrupamento, segundo plano, mudanças concorrentes, desmontagem da tela, falha sem loop, consulta pontual protegida, ausência de duplicidade e uma leitura de chave por lote. Não enviam mensagens reais. Robô, regras do Firebase e dados operacionais não foram alterados.
+
+## Próximos grupos, ainda não entregues
+
+1. Revisão do status das mensagens e confirmação de entrega no aparelho físico; preservar heartbeat de 15 minutos do robô e evitar polling.
 2. Revisão da fila (contagem de 3 minutos, concorrência e feedback), contingência offline e revisão completa do restante da navegação móvel.
 3. Consulta pública: reduzir busca por telefone, testar formatação de número e ambiguidades de código entre serviços. O formulário foi validado com resposta simulada; isso não comprova disponibilidade do banco de produção.
 

@@ -145,6 +145,13 @@ function harness(initial = {}) {
       enqueueReservationEvent: (_db, _tx, event) => events.push(event),
       dispatchReservationPush: async () => undefined,
     },
+    '@/lib/firebase/staff-push': {
+      enqueueStaffNotification: (_db, _tx, event) => events.push(event),
+      dispatchStaffNotifications: async () => undefined,
+    },
+    '@/lib/firebase/whatsapp-outbox': {
+      createWhatsAppOutboxEvent: (event) => event,
+    },
     '@/lib/firebase/delete-reservation': {
       deleteReservation: () => {
         throw new Error('Not part of these tests');
@@ -175,6 +182,7 @@ function harness(initial = {}) {
   }
   const pending = route('../app/api/reservas/[id]/route.ts');
   const create = route('../app/api/reservas/route.ts');
+  const waitlist = route('../app/api/fila/route.ts');
   function request(body, staff = true) {
     return new Request('https://test.invalid/api/reservas', {
       method: 'POST',
@@ -190,6 +198,12 @@ function harness(initial = {}) {
     reads,
     events,
     settings,
+    queue: (parameters = '', staff = true) =>
+      waitlist.GET(
+        new Request(`https://test.invalid/api/fila?${parameters}`, {
+          headers: staff ? { Authorization: 'Bearer verified-staff' } : {},
+        }),
+      ),
     create: (body, staff = true) => create.POST(request(body, staff)),
     list: (parameters = '', staff = true) =>
       create.GET(
@@ -213,6 +227,38 @@ const sample = {
   customerName: 'Teste local',
   whatsapp: '51900000000',
 };
+
+test('waitlist event lookup reads one record and rejects unauthenticated or invalid paths', async () => {
+  const h = harness({
+    'waitlist/q1': { customerName: 'Teste', status: 'called', partySize: 3 },
+    'waitlist/q2': { customerName: 'Outro', status: 'waiting' },
+  });
+  const response = await h.queue('id=q1');
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).entries[0].id, 'q1');
+  assert.deepEqual(h.reads, ['waitlist/q1']);
+  h.reads.length = 0;
+  assert.equal((await h.queue('id=q1', false)).status, 403);
+  assert.equal((await h.queue('id=../private')).status, 400);
+  assert.deepEqual(h.reads, []);
+  assert.deepEqual((await (await h.queue('id=missing')).json()).entries, []);
+  assert.deepEqual(h.reads, ['waitlist/missing']);
+});
+
+test('assigning the same table twice emits one internal event and no customer message', async () => {
+  const h = harness({ 'reservations/r1': sample });
+  assert.equal(
+    (await h.update({ action: 'assign_table', tableLabel: '12' })).status,
+    200,
+  );
+  assert.equal(
+    (await h.update({ action: 'assign_table', tableLabel: '12' })).status,
+    200,
+  );
+  assert.equal(h.events.length, 1);
+  assert.equal(h.events[0].eventType, 'reservation_table_assigned');
+  assert.equal(h.events[0].payload.serviceDate, sample.serviceDate);
+});
 
 test('approve reads only the reservation, preserves capacity and is idempotent', async () => {
   const h = harness({
