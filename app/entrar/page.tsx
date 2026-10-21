@@ -40,7 +40,12 @@ export default function LoginPage() {
     useState(isFirebaseConfigured);
   const [hasSavedSession, setHasSavedSession] = useState(false);
   const [firebaseStatus, setFirebaseStatus] = useState<
-    'checking' | 'connected' | 'not_configured' | 'quota_exceeded' | 'error'
+    | 'checking'
+    | 'connected'
+    | 'not_configured'
+    | 'quota_exceeded'
+    | 'offline'
+    | 'error'
   >('checking');
 
   useEffect(() => {
@@ -55,8 +60,10 @@ export default function LoginPage() {
       const installed =
         window.matchMedia('(display-mode: standalone)').matches ||
         Boolean((navigator as Navigator & { standalone?: boolean }).standalone);
-      if (user && installed) router.replace('/painel');
-      else setCheckingSavedSession(false);
+      if (user && installed) {
+        if (navigator.onLine) router.replace('/painel');
+        else window.location.replace('/painel');
+      } else setCheckingSavedSession(false);
     });
     return () => {
       window.clearTimeout(timeout);
@@ -82,7 +89,7 @@ export default function LoginPage() {
         },
       )
       .catch(() => {
-        if (active) setFirebaseStatus('error');
+        if (active) setFirebaseStatus(navigator.onLine ? 'error' : 'offline');
       });
     return () => {
       active = false;
@@ -213,6 +220,8 @@ export default function LoginPage() {
                       ? 'Firebase ainda não configurado no Netlify'
                       : firebaseStatus === 'quota_exceeded'
                         ? 'Limite diário do Firebase atingido'
+                        : firebaseStatus === 'offline'
+                          ? 'Sem internet. Use a sessão salva para consultar a última cópia, se disponível.'
                         : 'Não foi possível acessar o Firebase'}
               </div>
             </CardHeader>
@@ -220,7 +229,10 @@ export default function LoginPage() {
               {hasSavedSession && (
                 <Button
                   className="mb-5 min-h-12 w-full"
-                  onClick={() => router.push('/painel')}
+                  onClick={() => {
+                    if (navigator.onLine) router.push('/painel');
+                    else window.location.assign('/painel');
+                  }}
                 >
                   Continuar no painel
                 </Button>

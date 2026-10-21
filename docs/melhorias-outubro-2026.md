@@ -82,3 +82,12 @@ Publicar em grupos após validação. Não enviar credenciais, contas de serviç
 - Custo: uma leitura pontual adicional do registro da tentativa por nova inclusão protegida; não há listener, consulta periódica ou serviço novo. A busca antiga de possíveis reservas duplicadas por telefone ainda precisa da revisão do próximo grupo.
 
 Os testes de rotas usam Firebase simulado, sem criar reservas, clientes ou mensagens reais. A confirmação no ambiente publicado deve ser feita sem repetir dados operacionais apenas para teste.
+
+## Pacote 2D: abertura de contingência no aplicativo da equipe
+
+- O aplicativo prepara as páginas de entrada, visão geral, reservas e fila após validar a sessão do colaborador. Guarda apenas a estrutura estática das páginas, os arquivos do Next.js e o logo; respostas de API, dados de cliente, consultas do Firebase e respostas RSC não entram nesse cache.
+- Ao abrir ou navegar sem rede, ou se a hospedagem devolver erro temporário 5xx, o navegador pode usar essas páginas previamente preparadas. A sessão salva do Firebase ainda precisa existir no mesmo aparelho. As listas usam as cópias locais já existentes, exigem dados do dia e mostram o horário da cópia e o aviso de somente consulta.
+- A navegação entre as três telas operacionais usa abertura completa quando o aparelho está sem internet, evitando depender das requisições de navegação RSC do Next.js. Novas reservas, edição, cancelamentos e atendimento da fila continuam bloqueados sem conexão.
+- A preparação acontece uma vez por versão do cache nesse navegador e acessa apenas arquivos do site. Não cria listener, polling, leitura ou gravação no Firestore. O logo oficial é servido como arquivo estático para poder aparecer offline.
+- Para preparar esta versão, cada aparelho precisa abrir o aplicativo conectado ao menos uma vez após a publicação. Sem sessão anterior, cópia local válida ou espaço de armazenamento no navegador, não é possível consultar offline. Revogação de acesso feita enquanto o aparelho está offline só pode ser conhecida na reconexão; não se deve tratar essa cópia como registro definitivo.
+- Três testes simulam preparo, reabertura sem rede, erro da hospedagem e exclusão de APIs/dados de cliente do cache. O Chrome local confirmou a reabertura da entrada sem rede e as três páginas preparadas. A navegação completa e a abertura real em Android/iOS continuam pendentes de teste no próprio aparelho da equipe.

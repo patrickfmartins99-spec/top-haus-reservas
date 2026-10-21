@@ -19,6 +19,7 @@ export function BrandLogo({ className, priority = false, compact = false }: Bran
     >
       <Image
         src="/logo-tophaus.jpg"
+        unoptimized
         alt="Top Haus"
         fill
         priority={priority}

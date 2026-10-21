@@ -1,7 +1,7 @@
 'use client';
 import Image from 'next/image';
 
-import type { ReactNode } from 'react';
+import type { MouseEvent, ReactNode } from 'react';
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
@@ -134,6 +134,33 @@ export function StaffShell({ children }: { children: ReactNode }) {
     }>
   >([]);
   const [seenNotificationIds, setSeenNotificationIds] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (
+      checkingSession ||
+      !profile ||
+      !navigator.onLine ||
+      !('serviceWorker' in navigator)
+    )
+      return;
+    navigator.serviceWorker
+      .register('/sw.js', { scope: '/', updateViaCache: 'none' })
+      .then(() => navigator.serviceWorker.ready)
+      .then((registration) => {
+        registration.active?.postMessage({ type: 'prepare-staff-offline' });
+      })
+      .catch(() => undefined);
+  }, [checkingSession, profile]);
+
+  function openOfflineConsultation(event: MouseEvent<HTMLAnchorElement>) {
+    if (navigator.onLine || event.metaKey || event.ctrlKey || event.shiftKey)
+      return;
+    const path = event.currentTarget.getAttribute('href');
+    if (!['/painel', '/painel/reservas', '/painel/fila'].includes(path ?? ''))
+      return;
+    event.preventDefault();
+    window.location.assign(path!);
+  }
 
   useEffect(() => {
     const firebase = getFirebaseClient();
@@ -356,6 +383,8 @@ export function StaffShell({ children }: { children: ReactNode }) {
           <aside className="hidden border-r border-white/10 bg-black px-4 py-6 text-white lg:flex lg:flex-col">
             <Link
               href="/painel"
+              prefetch={false}
+              onClick={openOfflineConsultation}
               className="flex items-center gap-3 px-2"
               aria-label="Ir para a visão geral"
             >
@@ -378,6 +407,8 @@ export function StaffShell({ children }: { children: ReactNode }) {
                   <Link
                     key={href}
                     href={href}
+                    prefetch={false}
+                    onClick={openOfflineConsultation}
                     aria-current={active ? 'page' : undefined}
                     className={`flex items-center gap-3 rounded-lg px-3 py-2.5 transition ${active ? 'bg-[#8c4b28] text-white' : 'text-white/80 hover:bg-white/10 hover:text-white'}`}
                   >
@@ -542,6 +573,8 @@ export function StaffShell({ children }: { children: ReactNode }) {
                 <Link
                   key={href}
                   href={href}
+                  prefetch={false}
+                  onClick={openOfflineConsultation}
                   aria-current={active ? 'page' : undefined}
                   className={`relative flex min-h-14 flex-col items-center justify-center gap-1 rounded-xl px-0.5 py-1.5 text-[9px] font-bold transition active:scale-[0.97] min-[360px]:px-1 min-[360px]:text-[10px] ${active ? 'bg-[#f1e5dc] text-haus-terracotta' : 'text-black/60'}`}
                 >
