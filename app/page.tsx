@@ -39,6 +39,11 @@ import {
   type OperationalSettings,
 } from '@/lib/domain/operational-settings';
 import type { SpecialDateException } from '@/lib/domain/special-dates';
+import {
+  clearCreationRequestKey,
+  creationRequestKey,
+  pendingCreationRequestKey,
+} from '@/lib/client/creation-attempt';
 
 type Service = 'almoco' | 'rodizio';
 
@@ -153,24 +158,38 @@ export default function Home() {
   ) {
     event.preventDefault();
     if (!date) return;
-    if (unavailableReason) {
-      setError(unavailableReason);
-      return;
-    }
-    if (
-      !canBook(
+    const input = {
+      service,
+      serviceDate: date,
+      arrivalTime: time,
+      partySize,
+      customerName,
+      whatsapp,
+      notes,
+    };
+    const attempt = {
+      ...input,
+      customerName: customerName.trim(),
+      whatsapp: whatsapp.replace(/\D/g, ''),
+      notes: notes.trim().slice(0, 1000),
+    };
+    if (!checked) {
+      const deadlineValid = canBook(
         { service, serviceDate: date, arrivalTime: time },
         settings.minAdvanceHours,
-      )
-    ) {
-      setError(
-        service === 'rodizio'
-          ? 'As reservas para hoje encerram às 18h (horário de Brasília).'
-          : `O almoço exige ${settings.minAdvanceHours} horas de antecedência.`,
       );
-      return;
-    }
-    if (!checked) {
+      if (
+        (unavailableReason || !deadlineValid) &&
+        !(await pendingCreationRequestKey('public-reservation', attempt))
+      ) {
+        setError(
+          unavailableReason ||
+            (service === 'rodizio'
+              ? 'As reservas para hoje encerram às 18h (horário de Brasília).'
+              : `O almoço exige ${settings.minAdvanceHours} horas de antecedência.`),
+        );
+        return;
+      }
       setChecked(true);
       return;
     }
@@ -178,28 +197,27 @@ export default function Home() {
     setSubmitting(true);
     setError('');
     try {
+      const requestKey = await creationRequestKey(
+        'public-reservation',
+        attempt,
+      );
       const response = await fetch('/api/reservas', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          service,
-          serviceDate: date,
-          arrivalTime: time,
-          partySize,
-          customerName,
-          whatsapp,
-          notes,
-        }),
+        body: JSON.stringify({ ...input, requestKey }),
       });
       const data = await response.json();
       if (!response.ok)
         throw new Error(data.error ?? 'Não foi possível concluir a reserva.');
+      clearCreationRequestKey('public-reservation');
       setResult(data);
     } catch (caughtError) {
       setError(
-        caughtError instanceof Error
-          ? caughtError.message
-          : 'Não foi possível concluir a reserva.',
+        caughtError instanceof TypeError
+          ? 'A conexão falhou. Sua reserva pode ter sido salva. Tente novamente com os mesmos dados para conferir.'
+          : caughtError instanceof Error
+            ? caughtError.message
+            : 'Não foi possível concluir a reserva.',
       );
     } finally {
       setSubmitting(false);

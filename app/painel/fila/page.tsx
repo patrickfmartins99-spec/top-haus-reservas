@@ -43,6 +43,10 @@ import {
 } from '@/lib/domain/service-outcomes';
 import { getFirebaseClient } from '@/lib/firebase/client';
 import { fetchWithTimeout } from '@/lib/client/fetch-with-timeout';
+import {
+  clearCreationRequestKey,
+  creationRequestKey,
+} from '@/lib/client/creation-attempt';
 import { useStaffEntitySync } from '@/components/use-staff-entity-sync';
 import { mergeStaffEntity } from '@/lib/client/staff-events';
 import {
@@ -265,18 +269,28 @@ export default function WaitlistPage() {
     setError('');
     setSuccess('');
     try {
+      const input = {
+        customerName,
+        whatsapp,
+        partySize: Number(partySize),
+      };
+      const requestKey = editingEntry
+        ? null
+        : await creationRequestKey('staff-waitlist', {
+            ...input,
+            customerName: customerName.trim(),
+            whatsapp: whatsapp.replace(/\D/g, ''),
+          });
       const response = await staffRequest(
         currentUser,
         editingEntry ? `/api/fila/${editingEntry.id}` : '/api/fila',
         {
           method: editingEntry ? 'PATCH' : 'POST',
           body: JSON.stringify({
-            customerName,
-            whatsapp,
-            partySize: Number(partySize),
+            ...input,
             ...(editingEntry
               ? { expectedRevision: editingEntry.revision ?? 0 }
-              : {}),
+              : { requestKey }),
           }),
         },
       );
@@ -287,6 +301,7 @@ export default function WaitlistPage() {
         throw new Error(data.error ?? 'Não foi possível salvar o cliente.');
       }
       const edited = Boolean(editingEntry);
+      if (!edited) clearCreationRequestKey('staff-waitlist');
       const savedId = editingEntry?.id ?? data.id;
       setCustomerName('');
       setWhatsapp('');
@@ -296,14 +311,18 @@ export default function WaitlistPage() {
       setSuccess(
         edited
           ? 'Dados do cliente atualizados com sucesso.'
-          : 'Cliente adicionado à fila. Confira o texto de boas-vindas na aba Mensagens.',
+          : data.replayed
+            ? 'Esta inclusão já havia sido registrada. Confira a fila; para um novo atendimento, use Adicionar à fila novamente.'
+            : 'Cliente adicionado à fila. Confira o texto de boas-vindas na aba Mensagens.',
       );
       await refreshEntry(savedId);
     } catch (caughtError) {
       setError(
-        caughtError instanceof Error
-          ? caughtError.message
-          : 'Não foi possível salvar o cliente.',
+        caughtError instanceof TypeError
+          ? 'A conexão falhou. O cliente pode ter sido incluído. Tente novamente com os mesmos dados para conferir.'
+          : caughtError instanceof Error
+            ? caughtError.message
+            : 'Não foi possível salvar o cliente.',
       );
     } finally {
       mutationInFlight.current = false;

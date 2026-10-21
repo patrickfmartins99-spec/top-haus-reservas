@@ -12,6 +12,11 @@ import {
   brazilDate,
 } from '@/lib/domain/reservations';
 import { bookingExceptions } from '@/lib/domain/booking-policy';
+import {
+  creationDocumentId,
+  creationPayloadHash,
+  validCreationRequestKey,
+} from '@/lib/domain/creation-request';
 import { requireStaff } from '@/lib/auth/staff-request';
 import { getOperationalSettings } from '@/lib/domain/operational-settings';
 import {
@@ -139,6 +144,12 @@ export async function POST(request: Request) {
       { status: 400 },
     );
   }
+  const requestKey = (payload as { requestKey?: unknown }).requestKey;
+  if (requestKey !== undefined && !validCreationRequestKey(requestKey))
+    return NextResponse.json(
+      { error: 'Identificação da tentativa inválida.' },
+      { status: 400 },
+    );
   const database = getAdminDatabase();
   const staffContext = request.headers.get('authorization')
     ? await requireStaff(request)
@@ -157,17 +168,57 @@ export async function POST(request: Request) {
   }
 
   const normalizedWhatsapp = payload.whatsapp.replace(/\D/g, '');
+  const actor = staffContext?.decodedToken.uid ?? 'customer_web';
+  const requestHash = requestKey
+    ? creationPayloadHash({
+        actor,
+        service: payload.service,
+        serviceDate: payload.serviceDate,
+        arrivalTime: payload.arrivalTime,
+        partySize: payload.partySize,
+        customerName: payload.customerName.trim(),
+        whatsapp: normalizedWhatsapp,
+        notes: payload.notes?.trim().slice(0, 1000) ?? '',
+      })
+    : null;
+  const reservationRef = requestKey
+    ? database
+        .collection('reservations')
+        .doc(creationDocumentId('reservation', requestKey, actor))
+    : database.collection('reservations').doc();
+  const replayResponse = (data: DocumentData, id: string) => {
+    if (data.creationRequestHash !== requestHash)
+      return NextResponse.json(
+        { error: 'Esta tentativa já foi usada com outros dados.' },
+        { status: 409 },
+      );
+    return NextResponse.json({
+      id,
+      reservationCode: String(data.reservationCode ?? ''),
+      status: String(data.status ?? ''),
+      replayed: true,
+    });
+  };
   const duplicateKey = createHash('sha256')
     .update(`${normalizedWhatsapp}|${payload.serviceDate}|${payload.service}`)
     .digest('hex');
-  const [settings, possibleDuplicates] = await Promise.all([
+  const initialReads = await Promise.all([
     getOperationalSettings(database),
     database
       .collection('reservations')
       .where('whatsapp', '==', normalizedWhatsapp)
       .limit(50)
       .get(),
-  ]);
+  ]).catch(() => null);
+  if (!initialReads)
+    return NextResponse.json(
+      {
+        error:
+          'Não foi possível confirmar a reserva agora. Repita a tentativa sem mudar os dados para conferir se ela foi salva.',
+      },
+      { status: 503 },
+    );
+  const [settings, possibleDuplicates] = initialReads;
   const duplicate = possibleDuplicates.docs.find((document) => {
     const data = document.data();
     return (
@@ -178,6 +229,8 @@ export async function POST(request: Request) {
     );
   });
   if (duplicate) {
+    if (requestHash && duplicate.data().creationRequestHash === requestHash)
+      return replayResponse(duplicate.data(), duplicate.id);
     return NextResponse.json(
       {
         error:
@@ -189,6 +242,19 @@ export async function POST(request: Request) {
   }
   const instant = reservationInstant(payload);
   const deadlinePassed = !canBook(payload, settings.minAdvanceHours);
+  if (
+    requestHash &&
+    (deadlinePassed || (staffContext && payload.serviceDate < brazilDate()))
+  ) {
+    const existing = await reservationRef.get().catch(() => null);
+    if (!existing)
+      return NextResponse.json(
+        { error: 'Não foi possível conferir esta tentativa. Tente novamente.' },
+        { status: 503 },
+      );
+    if (existing.exists)
+      return replayResponse(existing.data() ?? {}, existing.id);
+  }
   if (staffContext && payload.serviceDate < brazilDate()) {
     return NextResponse.json(
       { error: 'Escolha hoje ou uma data futura para a nova reserva.' },
@@ -209,6 +275,18 @@ export async function POST(request: Request) {
   const latest = new Date();
   latest.setMonth(latest.getMonth() + settings.maxBookingMonths);
   if (instant.getTime() > latest.getTime()) {
+    if (requestHash) {
+      const existing = await reservationRef.get().catch(() => null);
+      if (!existing)
+        return NextResponse.json(
+          {
+            error: 'Não foi possível conferir esta tentativa. Tente novamente.',
+          },
+          { status: 503 },
+        );
+      if (existing.exists)
+        return replayResponse(existing.data() ?? {}, existing.id);
+    }
     return NextResponse.json(
       {
         error: `A reserva pode ser feita com até ${settings.maxBookingMonths} meses de antecedência.`,
@@ -231,17 +309,28 @@ export async function POST(request: Request) {
   const duplicateRef = database
     .collection('reservationDedup')
     .doc(duplicateKey);
-  const reservationRef = database.collection('reservations').doc();
   const auditRef = database.collection('auditLogs').doc();
 
   try {
-    await database.runTransaction(async (transaction) => {
-      const [capacitySnapshot, specialDateSnapshot, duplicateSnapshot] =
-        await Promise.all([
-          transaction.get(capacityRef),
-          transaction.get(specialDateRef),
-          transaction.get(duplicateRef),
-        ]);
+    const result = await database.runTransaction(async (transaction) => {
+      const [
+        capacitySnapshot,
+        specialDateSnapshot,
+        duplicateSnapshot,
+        requestSnapshot,
+      ] = await Promise.all([
+        transaction.get(capacityRef),
+        transaction.get(specialDateRef),
+        transaction.get(duplicateRef),
+        requestHash ? transaction.get(reservationRef) : Promise.resolve(null),
+      ]);
+
+      if (requestSnapshot?.exists) {
+        const existing = requestSnapshot.data() ?? {};
+        if (existing.creationRequestHash !== requestHash)
+          throw new Error('REQUEST_KEY_REUSED');
+        return { replayed: true, data: existing };
+      }
 
       const specialDate = specialDateSnapshot.data();
       if (
@@ -333,6 +422,7 @@ export async function POST(request: Request) {
         customerName: payload.customerName.trim(),
         whatsapp: normalizedWhatsapp,
         reservationCode: publicReservationCode,
+        ...(requestHash ? { creationRequestHash: requestHash } : {}),
         notes: payload.notes?.trim().slice(0, 1000) ?? '',
         status,
         source: staffContext ? 'staff_phone' : 'customer_web',
@@ -383,8 +473,16 @@ export async function POST(request: Request) {
             staffContext?.user?.displayName ?? staffContext?.decodedToken.name,
         },
       });
+      return { replayed: false };
     });
+    if (result.replayed)
+      return replayResponse(result.data ?? {}, reservationRef.id);
   } catch (error) {
+    if (error instanceof Error && error.message === 'REQUEST_KEY_REUSED')
+      return NextResponse.json(
+        { error: 'Esta tentativa já foi usada com outros dados.' },
+        { status: 409 },
+      );
     if (error instanceof Error && error.message === 'CLOSED_DATE') {
       return NextResponse.json(
         { error: 'O restaurante não recebe reservas nessa data.' },
@@ -434,7 +532,13 @@ export async function POST(request: Request) {
         { status: 409 },
       );
     }
-    throw error;
+    return NextResponse.json(
+      {
+        error:
+          'Não foi possível confirmar a reserva agora. Repita a tentativa sem mudar os dados para conferir se ela foi salva.',
+      },
+      { status: 503 },
+    );
   }
 
   after(() => dispatchReservationPush(database, reservationRef.id));

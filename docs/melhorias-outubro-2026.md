@@ -67,7 +67,18 @@ Contingência não é funcionamento offline completo: exige sessão previamente 
 ## Próximos grupos, ainda não entregues
 
 1. Revisão do status das mensagens e confirmação de entrega no aparelho físico; preservar heartbeat de 15 minutos do robô e evitar polling.
-2. Aprofundar contingência (abertura/navegação sem rede), recuperação de criação com resposta perdida e revisão completa do restante da navegação móvel.
+2. Aprofundar contingência (abertura/navegação sem rede) e revisão completa do restante da navegação móvel.
 3. Consulta pública: reduzir busca por telefone, testar formatação de número e ambiguidades de código entre serviços. O formulário foi validado com resposta simulada; isso não comprova disponibilidade do banco de produção.
 
 Publicar em grupos após validação. Não enviar credenciais, contas de serviço, caches de sessão nem a compilação local com configuração fictícia ao repositório.
+
+## Pacote 2C: repetição segura de inclusões
+
+- Cliente e equipe enviam uma identificação aleatória da tentativa ao criar reserva; a equipe faz o mesmo ao adicionar à fila. Ela permanece igual quando os mesmos dados são reenviados após uma resposta perdida e muda após sucesso ou alteração do formulário.
+- A identificação e a impressão digital dos dados ficam na sessão do navegador. Nome e telefone não são guardados nessa cópia da tentativa.
+- O servidor confere a tentativa dentro da transação. Se já foi concluída, devolve o registro original sem ocupar vagas novamente, duplicar auditoria ou gerar outra mensagem. A mesma identificação com dados diferentes é recusada.
+- A fila passou a usar uma transação na criação; a proteção funciona entre aparelhos simultâneos. Clientes usando uma versão antiga do site sem identificação continuam aceitos durante a transição.
+- Erros transitórios de gravação ou leitura retornam uma orientação para reenviar os mesmos dados; a equipe vê quando uma inclusão anterior foi recuperada.
+- Custo: uma leitura pontual adicional do registro da tentativa por nova inclusão protegida; não há listener, consulta periódica ou serviço novo. A busca antiga de possíveis reservas duplicadas por telefone ainda precisa da revisão do próximo grupo.
+
+Os testes de rotas usam Firebase simulado, sem criar reservas, clientes ou mensagens reais. A confirmação no ambiente publicado deve ser feita sem repetir dados operacionais apenas para teste.

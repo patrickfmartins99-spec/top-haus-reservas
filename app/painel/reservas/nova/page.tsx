@@ -18,6 +18,10 @@ import { brazilDate } from '@/lib/domain/reservations';
 import { DEFAULT_OPERATIONAL_SETTINGS } from '@/lib/domain/operational-settings';
 import type { SpecialDateException } from '@/lib/domain/special-dates';
 import { getFirebaseClient } from '@/lib/firebase/client';
+import {
+  clearCreationRequestKey,
+  creationRequestKey,
+} from '@/lib/client/creation-attempt';
 
 type Service = 'almoco' | 'rodizio';
 
@@ -113,33 +117,43 @@ export default function NewReservationPage() {
     setError('');
     try {
       const token = await user.getIdToken();
+      const input = {
+        customerName,
+        whatsapp,
+        serviceDate,
+        service,
+        arrivalTime,
+        partySize: Number(partySize),
+        notes,
+      };
+      const requestKey = await creationRequestKey('staff-reservation', {
+        ...input,
+        customerName: customerName.trim(),
+        whatsapp: whatsapp.replace(/\D/g, ''),
+        notes: notes.trim().slice(0, 1000),
+      });
       const response = await fetch('/api/reservas', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({
-          customerName,
-          whatsapp,
-          serviceDate,
-          service,
-          arrivalTime,
-          partySize: Number(partySize),
-          notes,
-        }),
+        body: JSON.stringify({ ...input, requestKey }),
       });
       const data = await response.json();
       if (!response.ok)
         throw new Error(data.error ?? 'Não foi possível criar a reserva.');
+      clearCreationRequestKey('staff-reservation');
       router.push(
         `/painel/reservas?data=${serviceDate}&criada=${encodeURIComponent(data.reservationCode)}`,
       );
     } catch (caughtError) {
       setError(
-        caughtError instanceof Error
-          ? caughtError.message
-          : 'Não foi possível criar a reserva.',
+        caughtError instanceof TypeError
+          ? 'A conexão falhou. A reserva pode ter sido salva. Tente novamente com os mesmos dados para conferir.'
+          : caughtError instanceof Error
+            ? caughtError.message
+            : 'Não foi possível criar a reserva.',
       );
     } finally {
       setSaving(false);

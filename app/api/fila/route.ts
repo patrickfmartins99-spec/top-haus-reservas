@@ -2,6 +2,11 @@ import { FieldValue } from 'firebase-admin/firestore';
 import { after, NextResponse } from 'next/server';
 
 import { requireStaff } from '@/lib/auth/staff-request';
+import {
+  creationDocumentId,
+  creationPayloadHash,
+  validCreationRequestKey,
+} from '@/lib/domain/creation-request';
 import { getAdminDatabase } from '@/lib/firebase/admin';
 import {
   enqueueStaffNotification,
@@ -108,6 +113,7 @@ export async function POST(request: Request) {
       ? payload.whatsapp.replace(/\D/g, '')
       : '';
   const partySize = Number(payload?.partySize);
+  const requestKey = payload?.requestKey;
 
   if (
     customerName.length < 2 ||
@@ -120,6 +126,11 @@ export async function POST(request: Request) {
       { status: 400 },
     );
   }
+  if (requestKey !== undefined && !validCreationRequestKey(requestKey))
+    return NextResponse.json(
+      { error: 'Identificação da tentativa inválida.' },
+      { status: 400 },
+    );
 
   const database = getAdminDatabase();
   if (!database)
@@ -128,51 +139,86 @@ export async function POST(request: Request) {
       { status: 503 },
     );
 
-  const entryRef = database.collection('waitlist').doc();
+  const actorId = context.decodedToken.uid;
+  const requestHash = requestKey
+    ? creationPayloadHash({ actorId, customerName, whatsapp, partySize })
+    : null;
+  const entryRef = requestKey
+    ? database
+        .collection('waitlist')
+        .doc(creationDocumentId('waitlist', requestKey, actorId))
+    : database.collection('waitlist').doc();
   const whatsappEventRef = database.collection('whatsappQueue').doc();
-  const batch = database.batch();
-  batch.set(entryRef, {
-    customerName,
-    whatsapp,
-    partySize,
-    status: 'waiting',
-    revision: 0,
-    notificationStatus: 'pending_whatsapp_integration',
-    enteredAt: FieldValue.serverTimestamp(),
-    updatedAt: FieldValue.serverTimestamp(),
-    createdBy: context.decodedToken.uid,
-  });
-  batch.set(database.collection('auditLogs').doc(), {
-    waitlistId: entryRef.id,
-    actorType: 'staff',
-    actorId: context.decodedToken.uid,
-    action: 'waitlist_created',
-    changes: { customerName, partySize },
-    createdAt: FieldValue.serverTimestamp(),
-  });
-  batch.set(
-    whatsappEventRef,
-    createWhatsAppOutboxEvent({
-      eventType: 'waitlist_created',
-      entityType: 'waitlist',
-      entityId: entryRef.id,
-      whatsapp,
-      payload: { customerName, partySize },
-    }),
-  );
-  enqueueStaffNotification(database, batch, {
-    id: whatsappEventRef.id,
-    eventType: 'waitlist_created',
-    entityId: entryRef.id,
-    entityType: 'waitlist',
-    payload: { customerName, partySize },
-    actor: {
-      type: 'staff',
-      name: context.user?.displayName ?? context.decodedToken.name,
-    },
-  });
-  await batch.commit();
-  after(() => dispatchStaffNotifications(database));
-
-  return NextResponse.json({ id: entryRef.id }, { status: 201 });
+  try {
+    const result = await database.runTransaction(async (transaction) => {
+      if (requestHash) {
+        const existing = await transaction.get(entryRef);
+        if (existing.exists) {
+          if (existing.data()?.creationRequestHash !== requestHash)
+            return { conflict: true };
+          return { replayed: true };
+        }
+      }
+      transaction.set(entryRef, {
+        customerName,
+        whatsapp,
+        partySize,
+        ...(requestHash ? { creationRequestHash: requestHash } : {}),
+        status: 'waiting',
+        revision: 0,
+        notificationStatus: 'pending_whatsapp_integration',
+        enteredAt: FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
+        createdBy: actorId,
+      });
+      transaction.set(database.collection('auditLogs').doc(), {
+        waitlistId: entryRef.id,
+        actorType: 'staff',
+        actorId,
+        action: 'waitlist_created',
+        changes: { customerName, partySize },
+        createdAt: FieldValue.serverTimestamp(),
+      });
+      transaction.set(
+        whatsappEventRef,
+        createWhatsAppOutboxEvent({
+          eventType: 'waitlist_created',
+          entityType: 'waitlist',
+          entityId: entryRef.id,
+          whatsapp,
+          payload: { customerName, partySize },
+        }),
+      );
+      enqueueStaffNotification(database, transaction, {
+        id: whatsappEventRef.id,
+        eventType: 'waitlist_created',
+        entityId: entryRef.id,
+        entityType: 'waitlist',
+        payload: { customerName, partySize },
+        actor: {
+          type: 'staff',
+          name: context.user?.displayName ?? context.decodedToken.name,
+        },
+      });
+      return { replayed: false };
+    });
+    if ('conflict' in result)
+      return NextResponse.json(
+        { error: 'Esta tentativa já foi usada com outros dados.' },
+        { status: 409 },
+      );
+    if (!result.replayed) after(() => dispatchStaffNotifications(database));
+    return NextResponse.json(
+      { id: entryRef.id, replayed: result.replayed },
+      { status: result.replayed ? 200 : 201 },
+    );
+  } catch {
+    return NextResponse.json(
+      {
+        error:
+          'Não foi possível confirmar a inclusão. Repita a tentativa sem mudar os dados para conferir se ela foi salva.',
+      },
+      { status: 503 },
+    );
+  }
 }

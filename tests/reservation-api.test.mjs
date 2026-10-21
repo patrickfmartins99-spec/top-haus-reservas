@@ -9,6 +9,7 @@ import * as policy from '../lib/domain/booking-policy.ts';
 import * as outcomes from '../lib/domain/service-outcomes.ts';
 import * as codes from '../lib/domain/reservation-code.ts';
 import * as waitlistTime from '../lib/domain/waitlist-time.ts';
+import * as creationRequest from '../lib/domain/creation-request.ts';
 
 // Isolated route integration tests: never initialize Firebase or send a message.
 function harness(initial = {}) {
@@ -130,6 +131,7 @@ function harness(initial = {}) {
     '@/lib/domain/service-outcomes': outcomes,
     '@/lib/domain/reservation-code': codes,
     '@/lib/domain/waitlist-time': waitlistTime,
+    '@/lib/domain/creation-request': creationRequest,
     '@/lib/domain/operational-settings': {
       getOperationalSettings: async () => settings,
     },
@@ -211,6 +213,7 @@ function harness(initial = {}) {
           headers: staff ? { Authorization: 'Bearer verified-staff' } : {},
         }),
       ),
+    createQueue: (body, staff = true) => waitlist.POST(request(body, staff)),
     create: (body, staff = true) => create.POST(request(body, staff)),
     list: (parameters = '', staff = true) =>
       create.GET(
@@ -242,6 +245,46 @@ const queueSample = {
   status: 'waiting',
   revision: 0,
 };
+
+test('repeating one waitlist creation returns the original entry and emits one message', async () => {
+  const h = harness();
+  const input = {
+    customerName: 'Cliente teste',
+    whatsapp: '51900000000',
+    partySize: 3,
+    requestKey: '550e8400-e29b-41d4-a716-446655440000',
+  };
+  const results = await Promise.all([
+    h.createQueue(input),
+    h.createQueue(input),
+  ]);
+  assert.deepEqual(
+    results.map((response) => response.status),
+    [201, 200],
+  );
+  const first = await results[0].json();
+  const second = await results[1].json();
+  assert.equal(first.id, second.id);
+  assert.equal(second.replayed, true);
+  assert.equal(
+    [...h.records.keys()].filter((key) => key.startsWith('waitlist/')).length,
+    1,
+  );
+  assert.equal(
+    [...h.records.keys()].filter((key) => key.startsWith('auditLogs/')).length,
+    1,
+  );
+  assert.equal(
+    [...h.records.keys()].filter((key) => key.startsWith('whatsappQueue/'))
+      .length,
+    1,
+  );
+  assert.equal(h.events.length, 1);
+  assert.equal((await h.createQueue({ ...input, partySize: 4 })).status, 409);
+  h.records.get(`waitlist/${first.id}`).status = 'called';
+  assert.equal((await h.createQueue(input)).status, 200);
+  assert.equal((await h.createQueue(input, false)).status, 403);
+});
 
 test('concurrent calls create one message and keep the original call timestamp', async () => {
   const h = harness({ 'waitlist/q1': queueSample });
@@ -489,6 +532,75 @@ test('staff can exceed capacity, customer cannot; real seats and exception are a
   )[1];
   assert.equal(saved.bookingExceptions.capacityOverride, true);
   assert.equal(saved.createdBy, 'staff-test');
+});
+
+test('repeating a reservation creation preserves one booking, seat count and notification', async () => {
+  const tomorrow = new Date(Date.now() + 3 * 86_400_000);
+  while (reservations.isMonday(reservations.brazilDate(tomorrow)))
+    tomorrow.setDate(tomorrow.getDate() + 1);
+  const serviceDate = reservations.brazilDate(tomorrow);
+  const capacityKey = `serviceCapacity/${serviceDate}_rodizio`;
+  const h = harness();
+  const input = {
+    ...sample,
+    serviceDate,
+    partySize: 4,
+    requestKey: '550e8400-e29b-41d4-a716-446655440001',
+  };
+  const results = await Promise.all([h.create(input), h.create(input)]);
+  assert.deepEqual(
+    results.map((response) => response.status),
+    [201, 200],
+  );
+  const first = await results[0].json();
+  const second = await results[1].json();
+  assert.equal(first.id, second.id);
+  assert.equal(second.replayed, true);
+  assert.equal(h.records.get(capacityKey).heldSeats, 4);
+  assert.equal(
+    [...h.records.keys()].filter((key) => key.startsWith('reservations/'))
+      .length,
+    1,
+  );
+  assert.equal(h.events.length, 1);
+  assert.equal(
+    (await h.create({ ...input, customerName: 'Outro nome' })).status,
+    409,
+  );
+  assert.equal(
+    (
+      await h.create({
+        ...input,
+        serviceDate: reservations.brazilDate(
+          new Date(Date.now() + 8 * 86_400_000),
+        ),
+      })
+    ).status,
+    409,
+  );
+  h.records.get(`reservations/${first.id}`).status = 'cancelled';
+  assert.equal((await h.create(input)).status, 200);
+  assert.equal(h.records.get(capacityKey).heldSeats, 4);
+});
+
+test('customer can safely retry a saved reservation after losing the response', async () => {
+  const future = new Date(Date.now() + 3 * 86_400_000);
+  while (reservations.isMonday(reservations.brazilDate(future)))
+    future.setDate(future.getDate() + 1);
+  const input = {
+    ...sample,
+    serviceDate: reservations.brazilDate(future),
+    partySize: 2,
+    requestKey: '550e8400-e29b-41d4-a716-446655440002',
+  };
+  const h = harness();
+  const first = await h.create(input, false);
+  assert.equal(first.status, 201);
+  const reservation = await first.json();
+  const replay = await h.create(input, false);
+  assert.equal(replay.status, 200);
+  assert.equal((await replay.json()).id, reservation.id);
+  assert.equal(h.events.length, 1);
 });
 
 test('staff deadline exception does not open dates administratively closed', async () => {
